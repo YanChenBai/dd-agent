@@ -30,7 +30,7 @@
   },
   "devDependencies": {
     "@oxc-node/core": "catalog:",
-    "@types/node": "^25.6.2",
+    "@types/node": "^25.9.4",
     "@typescript/native-preview": "7.0.0-dev.20260509.2",
     "bumpp": "^11.1.0",
     "typescript": "^6.0.3",

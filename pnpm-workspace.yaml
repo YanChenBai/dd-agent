@@ -3,13 +3,13 @@ packages:
   - packages/*
 
 catalog:
-  '@oxc-node/core': ^0.1.0
-  "@types/node": ^24
+  "@oxc-node/core": ^0.1.0
+  "@types/node": ^24.13.2
   openai: ^6.45.0
   sherpa-onnx-node: ^1.13.3
-  typescript: ^5
+  typescript: ^5.9.3
   vite: npm:@voidzero-dev/vite-plus-core@latest
-  vite-plus: latest
+  vite-plus: ^0.2.2
   vitest: npm:@voidzero-dev/vite-plus-test@latest
 
 catalogMode: prefer

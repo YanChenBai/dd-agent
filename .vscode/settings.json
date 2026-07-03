@@ -19,5 +19,5 @@
   "editor.codeActionsOnSave": {
     "source.fixAll.oxc": "explicit"
   },
-  "cSpell.words": ["ONNX", "paraformer", "zipformer"]
+  "cSpell.words": ["emnapi", "napi", "ONNX", "paraformer", "tybys", "zipformer"]
 }
