@@ -87,6 +87,12 @@ Bilibili 直播流
 | `VAD_KIND`                | `silero` | VAD 实现，可选 `silero` 或 `ten`   |
 | `PROVIDER`                | `cpu`    | sherpa-onnx 执行提供程序           |
 
+## 未来开发方向
+
+- **说话人区分与主播声纹识别**：接入 sherpa-onnx Speaker Diarization，将字幕按说话人分段；支持预先注册主播声纹，通过 Speaker Identification 标记主播、嘉宾及其他音源，减少错误归因。
+- **自定义唤醒词**：接入 sherpa-onnx Keyword Spotting，支持类似“小爱同学”的本地唤醒词；结合主播声纹校验，只在主播说出唤醒词时触发 Agent，降低直播音轨中的误唤醒。
+- **LoopAgent**：将当前单次弹幕生成扩展为可持续决策的 Agent 循环，引入工具调用、短期与长期记忆、事件判断和行动规划，使 Agent 能根据直播上下文决定何时观察、回应、等待或执行其他操作。
+
 ## 开发
 
 Agent 应用位于：
