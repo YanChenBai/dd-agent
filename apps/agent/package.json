@@ -17,23 +17,37 @@
   ],
   "type": "module",
   "exports": {
-    ".": "./dist/index.mjs",
+    ".": "./dist/index.js",
     "./package.json": "./package.json"
   },
   "publishConfig": {
     "access": "public"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "catalog:",
     "@dd-agent/native": "workspace:*",
-    "openai": "catalog:",
-    "sherpa-onnx-node": "catalog:"
+    "@t3-oss/env-core": "catalog:",
+    "@viyuni/bevent-relay": "catalog:",
+    "@vue-tui/runtime": "0.1.1",
+    "ai": "catalog:",
+    "dotenv": "catalog:",
+    "ky": "catalog:",
+    "nanoevents": "catalog:",
+    "p-queue": "catalog:",
+    "sharp": "catalog:",
+    "sherpa-onnx-node": "catalog:",
+    "vue": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@oxc-node/core": "catalog:",
     "@types/node": "^25.9.4",
     "@typescript/native-preview": "7.0.0-dev.20260509.2",
+    "@vitejs/plugin-vue": "catalog:",
+    "@vue-tui/vite": "catalog:",
     "bumpp": "^11.1.0",
     "typescript": "^6.0.3",
-    "vite-plus": "catalog:"
+    "vite-plus": "catalog:",
+    "vitest": "^4.1.9"
   }
 }

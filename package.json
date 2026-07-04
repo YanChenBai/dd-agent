@@ -6,6 +6,7 @@
   "scripts": {
     "ready": "vp check && vp run -r test && vp run -r build",
     "dev": "vp run dd-agent#dev",
+    "start": "vp run dd-agent#start",
     "prepare": "vp config"
   },
   "devDependencies": {

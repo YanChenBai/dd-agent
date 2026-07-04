@@ -20,20 +20,17 @@ Bilibili 直播流
 
 ## 环境要求
 
-- Windows（原生音频扩展当前仅支持 Windows）
 - Node.js 22.12 或更高版本
 - [Vite+](https://viteplus.dev/guide/) 全局命令 `vp`
-- Rust 工具链（构建 `@dd-agent/native` 时需要）
 - 可从命令行调用的 FFmpeg
 - 一个支持图片输入和结构化输出的 OpenAI 兼容模型
 
 ## 快速开始
 
-1. 安装依赖并构建工作区：
+1. 安装依赖：
 
    ```powershell
    vp install
-   vp run -r build
    ```
 
 2. 准备本地语音模型。默认目录结构如下：
@@ -68,8 +65,10 @@ Bilibili 直播流
 4. 启动 Agent：
 
    ```powershell
-   vp run dev
+   vpr start
    ```
+
+   `vpr start` 会先生成面向 Node.js 的生产构建，再运行 `dist/index.js`，不会启用热更新。开发时可使用 `vpr dev` 启动带热更新的 Vite 开发模式。
 
    按 `Ctrl+C` 安全退出。默认 `SEND_DANMAKU=0`，只预览生成的弹幕；确认登录同步配置可用后，将其改为 `1` 才会真正发送。
 
@@ -90,11 +89,10 @@ Bilibili 直播流
 
 ## 开发
 
-这是一个 Vite+ monorepo：
+Agent 应用位于：
 
 ```text
-apps/agent       直播 Agent、终端界面和多模态处理流程
-packages/native  基于 napi-rs 的 Windows 原生音频能力
+apps/agent  直播 Agent、终端界面和多模态处理流程
 ```
 
 常用命令：
@@ -102,7 +100,9 @@ packages/native  基于 napi-rs 的 Windows 原生音频能力
 ```powershell
 vp check          # 格式化检查、Lint 和类型检查
 vp test           # 运行测试
-vp run -r build   # 构建所有工作区包
+vpr dd-agent#build # 构建 Agent
+vpr start         # 构建并运行 Agent，不启用热更新
+vpr dev           # 以开发模式运行 Agent，启用热更新
 vp run ready      # 依次执行检查、测试和构建
 ```
 
