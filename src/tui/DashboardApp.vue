@@ -3,7 +3,7 @@ import { Box, Text } from '@vue-tui/runtime';
 
 import DashboardPanel from './DashboardPanel.vue';
 import { formatBytes, formatTime, formatTimeRange } from './format.ts';
-import type { DashboardModule, DashboardState } from './types.ts';
+import type { DanmakuDelivery, DashboardModule, DashboardState } from './types.ts';
 
 const props = defineProps<{
   state: DashboardState;
@@ -23,6 +23,20 @@ function formatLiveStatus(status: number) {
 function latestError(module: DashboardModule) {
   return props.state.errors.findLast(error => error.module === module)?.message;
 }
+
+const deliveryLabels: Record<DanmakuDelivery, string> = {
+  preview: '预览',
+  pending: '发送中',
+  sent: '已发送',
+  failed: '发送失败',
+};
+
+const deliveryColors: Record<DanmakuDelivery, string> = {
+  preview: 'yellow',
+  pending: 'cyan',
+  sent: 'green',
+  failed: 'red',
+};
 </script>
 
 <template>
@@ -50,6 +64,9 @@ function latestError(module: DashboardModule) {
           <Text v-if="state.brain.length === 0" dim-color>等待生成弹幕…</Text>
           <Text v-for="entry in state.brain" :key="entry.id" wrap="truncate-end">
             <Text dim-color>{{ formatTimeRange(entry.startTimeMs, entry.endTimeMs) }} </Text>
+            <Text :color="deliveryColors[entry.delivery]"
+              >[{{ deliveryLabels[entry.delivery] }}]</Text
+            >
             {{ entry.message }}
           </Text>
         </DashboardPanel>

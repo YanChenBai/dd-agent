@@ -6,7 +6,12 @@ import type { DanmakuEvent } from '../brain/types.ts';
 import type { HearingFinalEvent } from '../hearing/types.ts';
 import type { VisionImageEvent } from '../vision/types.ts';
 import DashboardApp from './DashboardApp.vue';
-import type { DashboardModule, DashboardState } from './types.ts';
+import type {
+  BrainDashboardEntry,
+  DanmakuDelivery,
+  DashboardModule,
+  DashboardState,
+} from './types.ts';
 
 export const DEFAULT_ENTRY_LIMIT = 8;
 
@@ -47,18 +52,24 @@ export function createDashboard(roomInfo: RoomUserInfo, options: DashboardOption
         mounted = false;
       }
     },
-    addDanmaku(event: DanmakuEvent) {
+    addDanmaku(event: DanmakuEvent, willSend: boolean) {
+      const entries: BrainDashboardEntry[] = [];
       for (const message of event.messages) {
-        appendLimited(
-          state.brain,
-          {
-            id: nextId++,
-            message,
-            startTimeMs: event.startTimeMs,
-            endTimeMs: event.endTimeMs,
-          },
-          entryLimit,
-        );
+        const entry: BrainDashboardEntry = {
+          id: nextId++,
+          delivery: willSend ? 'pending' : 'preview',
+          message,
+          startTimeMs: event.startTimeMs,
+          endTimeMs: event.endTimeMs,
+        };
+        appendLimited(state.brain, entry, entryLimit);
+        entries.push(entry);
+      }
+      return entries;
+    },
+    setDanmakuDelivery(entries: readonly BrainDashboardEntry[], delivery: DanmakuDelivery) {
+      for (const entry of entries) {
+        entry.delivery = delivery;
       }
     },
     addHearing(event: HearingFinalEvent) {

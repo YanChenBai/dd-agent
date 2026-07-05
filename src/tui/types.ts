@@ -9,8 +9,11 @@ export interface TimedDashboardEntry {
 }
 
 export interface BrainDashboardEntry extends TimedDashboardEntry {
+  delivery: DanmakuDelivery;
   message: string;
 }
+
+export type DanmakuDelivery = 'preview' | 'pending' | 'sent' | 'failed';
 
 export interface HearingDashboardEntry extends TimedDashboardEntry {
   index: number;

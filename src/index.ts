@@ -59,11 +59,17 @@ vision.onError(error => {
 });
 
 brain.onDanmaku(event => {
-  dashboard.addDanmaku(event);
-  if (env.SEND_DANMAKU === 1) {
-    void sendDanmaku(event.messages).catch(error => {
-      dashboard.addError('brain', error);
-    });
+  const willSend = env.SEND_DANMAKU === 1;
+  const entries = dashboard.addDanmaku(event, willSend);
+  if (willSend) {
+    void sendDanmaku(event.messages)
+      .then(() => {
+        dashboard.setDanmakuDelivery(entries, 'sent');
+      })
+      .catch(error => {
+        dashboard.setDanmakuDelivery(entries, 'failed');
+        dashboard.addError('brain', error);
+      });
   }
 });
 
