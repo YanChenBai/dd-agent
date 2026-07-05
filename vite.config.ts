@@ -1,6 +1,16 @@
+import vue from '@vitejs/plugin-vue';
+import { vueTui } from '@vue-tui/vite';
 import { defineConfig } from 'vite-plus';
 
 export default defineConfig({
+  plugins: [vue(), vueTui({ entry: 'src/index.ts' })],
+  build: {
+    rolldownOptions: {
+      output: {
+        minify: false,
+      },
+    },
+  },
   staged: {
     '*': 'vp check --fix',
   },
@@ -19,5 +29,22 @@ export default defineConfig({
   },
   run: {
     cache: true,
+    tasks: {
+      build: {
+        command: 'vp build',
+      },
+      dev: {
+        cache: false,
+        command: 'vp dev',
+      },
+      ready: {
+        command: 'vp check && vp test && vp build',
+      },
+      start: {
+        cache: false,
+        command: 'node --import @oxc-node/core/register --env-file=.env dist/index.js',
+        dependsOn: ['build'],
+      },
+    },
   },
 });

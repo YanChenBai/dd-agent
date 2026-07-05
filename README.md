@@ -36,7 +36,7 @@ Bilibili 直播流
 2. 准备本地语音模型。默认目录结构如下：
 
    ```text
-   apps/agent/models/
+   models/
    ├─ sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09/
    │  ├─ model.int8.onnx
    │  └─ tokens.txt
@@ -48,7 +48,7 @@ Bilibili 直播流
 3. 从示例创建本地配置：
 
    ```powershell
-   Copy-Item apps/agent/.env.example apps/agent/.env
+   Copy-Item .env.example .env
    ```
 
    至少需要填写：
@@ -74,7 +74,7 @@ Bilibili 直播流
 
 ## 常用配置
 
-完整配置及注释见 [`apps/agent/.env.example`](apps/agent/.env.example)。常用选项包括：
+完整配置及注释见 [`.env.example`](.env.example)。常用选项包括：
 
 | 变量                      | 默认值   | 说明                               |
 | ------------------------- | -------- | ---------------------------------- |
@@ -95,21 +95,15 @@ Bilibili 直播流
 
 ## 开发
 
-Agent 应用位于：
-
-```text
-apps/agent  直播 Agent、终端界面和多模态处理流程
-```
-
 常用命令：
 
 ```powershell
 vp check          # 格式化检查、Lint 和类型检查
 vp test           # 运行测试
-vpr dd-agent#build # 构建 Agent
-vpr start         # 构建并运行 Agent，不启用热更新
-vpr dev           # 以开发模式运行 Agent，启用热更新
-vp run ready      # 依次执行检查、测试和构建
+vpr build # 构建 Agent
+vpr start # 构建并运行 Agent，不启用热更新
+vpr dev   # 以开发模式运行 Agent，启用热更新
+vpr ready # 依次执行检查、测试和构建
 ```
 
 ## 安全提示

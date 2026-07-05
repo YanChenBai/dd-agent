@@ -10,7 +10,7 @@ const listener = createListener({
     password: env.LOGIN_SYNC_PASSWORD,
   },
 });
-const SEND_INTERVAL_MS = 20_000;
+const SEND_INTERVAL_MS = 5_000;
 const sendQueue = new PQueue({
   concurrency: 1,
   interval: SEND_INTERVAL_MS,
