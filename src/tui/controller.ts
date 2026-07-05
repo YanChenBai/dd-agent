@@ -17,6 +17,7 @@ export const DEFAULT_ENTRY_LIMIT = 8;
 
 export interface DashboardOptions {
   entryLimit?: number;
+  onExit?: () => void | Promise<void>;
   sendDanmakuEnabled?: boolean;
 }
 
@@ -33,6 +34,7 @@ export function createDashboard(roomInfo: RoomUserInfo, options: DashboardOption
   });
   const app = createApp(DashboardApp, {
     state,
+    onExit: options.onExit,
     onToggleSendDanmaku() {
       state.sendDanmakuEnabled = !state.sendDanmakuEnabled;
     },

@@ -25,6 +25,7 @@ const brain = createBrain(memory, {
   streamerAliases: env.LIVE_STREAMER_ALIASES,
 });
 const dashboard = createDashboard(roomInfo, {
+  onExit: stop,
   sendDanmakuEnabled: env.SEND_DANMAKU === 1,
 });
 let stopping = false;

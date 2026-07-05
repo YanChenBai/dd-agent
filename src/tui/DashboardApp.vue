@@ -7,11 +7,16 @@ import type { DanmakuDelivery, DashboardModule, DashboardState } from './types.t
 
 const props = defineProps<{
   state: DashboardState;
+  onExit?: () => void | Promise<void>;
   onToggleSendDanmaku: () => void;
 }>();
 
 useInput((input, key) => {
   const isKeyPress = key.eventType === undefined || key.eventType === 'press';
+  if (isKeyPress && key.ctrl && input.toLowerCase() === 'c') {
+    void props.onExit?.();
+    return;
+  }
   if (isKeyPress && input.toLowerCase() === 's' && !key.ctrl && !key.meta) {
     props.onToggleSendDanmaku();
   }
@@ -56,43 +61,13 @@ const deliveryColors: Record<DanmakuDelivery, string> = {
 
     <Box :flex-grow="1" flex-direction="column" border-style="single" overflow="hidden">
       <Box
-        :flex-grow="1"
+        :flex-grow="3"
         border-style="single"
         :border-top="false"
         :border-left="false"
         :border-right="false"
         overflow="hidden"
       >
-        <DashboardPanel
-          title="弹幕输出"
-          accent="magenta"
-          :status="state.sendDanmakuEnabled ? '发送开启' : '仅预览'"
-          :status-color="state.sendDanmakuEnabled ? 'green' : 'yellow'"
-          border-right
-          :error="latestError('brain')"
-        >
-          <Text v-if="state.brain.length === 0" dim-color>等待生成弹幕…</Text>
-          <Text v-for="entry in state.brain" :key="entry.id" wrap="truncate-end">
-            <Text dim-color>{{ formatTimeRange(entry.startTimeMs, entry.endTimeMs) }} </Text>
-            <Text :color="deliveryColors[entry.delivery]"
-              >[{{ deliveryLabels[entry.delivery] }}]</Text
-            >
-            {{ entry.message }}
-          </Text>
-        </DashboardPanel>
-
-        <DashboardPanel title="转写输出" accent="green" :error="latestError('hearing')">
-          <Text v-if="state.hearing.length === 0" dim-color>等待语音转写…</Text>
-          <Text v-for="entry in state.hearing" :key="entry.id" wrap="truncate-end">
-            <Text dim-color
-              >#{{ entry.index }} {{ formatTimeRange(entry.startTimeMs, entry.endTimeMs) }}
-            </Text>
-            {{ entry.text }}
-          </Text>
-        </DashboardPanel>
-      </Box>
-
-      <Box :flex-grow="1" overflow="hidden">
         <DashboardPanel
           title="图像输出"
           accent="yellow"
@@ -123,6 +98,36 @@ const deliveryColors: Record<DanmakuDelivery, string> = {
             }}</Text></Text
           >
           <Text dim-color>启动于 {{ formatTime(state.startedAtMs) }}</Text>
+        </DashboardPanel>
+      </Box>
+
+      <Box :flex-grow="2" overflow="hidden">
+        <DashboardPanel
+          title="弹幕输出"
+          accent="magenta"
+          :status="state.sendDanmakuEnabled ? '发送开启' : '仅预览'"
+          :status-color="state.sendDanmakuEnabled ? 'green' : 'yellow'"
+          border-right
+          :error="latestError('brain')"
+        >
+          <Text v-if="state.brain.length === 0" dim-color>等待生成弹幕…</Text>
+          <Text v-for="entry in state.brain" :key="entry.id" wrap="truncate-end">
+            <Text dim-color>{{ formatTimeRange(entry.startTimeMs, entry.endTimeMs) }} </Text>
+            <Text :color="deliveryColors[entry.delivery]"
+              >[{{ deliveryLabels[entry.delivery] }}]</Text
+            >
+            {{ entry.message }}
+          </Text>
+        </DashboardPanel>
+
+        <DashboardPanel title="转写输出" accent="green" :error="latestError('hearing')">
+          <Text v-if="state.hearing.length === 0" dim-color>等待语音转写…</Text>
+          <Text v-for="entry in state.hearing" :key="entry.id" wrap="truncate-end">
+            <Text dim-color
+              >#{{ entry.index }} {{ formatTimeRange(entry.startTimeMs, entry.endTimeMs) }}
+            </Text>
+            {{ entry.text }}
+          </Text>
         </DashboardPanel>
       </Box>
     </Box>
