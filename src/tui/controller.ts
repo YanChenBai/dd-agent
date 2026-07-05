@@ -17,6 +17,7 @@ export const DEFAULT_ENTRY_LIMIT = 8;
 
 export interface DashboardOptions {
   entryLimit?: number;
+  sendDanmakuEnabled?: boolean;
 }
 
 export function createDashboard(roomInfo: RoomUserInfo, options: DashboardOptions = {}) {
@@ -24,12 +25,18 @@ export function createDashboard(roomInfo: RoomUserInfo, options: DashboardOption
   const state = reactive<DashboardState>({
     roomInfo,
     startedAtMs: Date.now(),
+    sendDanmakuEnabled: options.sendDanmakuEnabled ?? false,
     brain: [],
     hearing: [],
     vision: [],
     errors: [],
   });
-  const app = createApp(DashboardApp, { state });
+  const app = createApp(DashboardApp, {
+    state,
+    onToggleSendDanmaku() {
+      state.sendDanmakuEnabled = !state.sendDanmakuEnabled;
+    },
+  });
   let nextId = 0;
   let mounted = false;
 

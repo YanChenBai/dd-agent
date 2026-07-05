@@ -35,6 +35,7 @@ export interface DashboardError {
 export interface DashboardState {
   roomInfo: RoomUserInfo;
   startedAtMs: number;
+  sendDanmakuEnabled: boolean;
   brain: BrainDashboardEntry[];
   hearing: HearingDashboardEntry[];
   vision: VisionDashboardEntry[];

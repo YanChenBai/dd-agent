@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Box, Text } from '@vue-tui/runtime';
+import { Box, Text, useInput } from '@vue-tui/runtime';
 
 import DashboardPanel from './DashboardPanel.vue';
 import { formatBytes, formatTime, formatTimeRange } from './format.ts';
@@ -7,7 +7,15 @@ import type { DanmakuDelivery, DashboardModule, DashboardState } from './types.t
 
 const props = defineProps<{
   state: DashboardState;
+  onToggleSendDanmaku: () => void;
 }>();
+
+useInput((input, key) => {
+  const isKeyPress = key.eventType === undefined || key.eventType === 'press';
+  if (isKeyPress && input.toLowerCase() === 's' && !key.ctrl && !key.meta) {
+    props.onToggleSendDanmaku();
+  }
+});
 
 function formatLiveStatus(status: number) {
   switch (status) {
@@ -58,6 +66,8 @@ const deliveryColors: Record<DanmakuDelivery, string> = {
         <DashboardPanel
           title="弹幕输出"
           accent="magenta"
+          :status="state.sendDanmakuEnabled ? '发送开启' : '仅预览'"
+          :status-color="state.sendDanmakuEnabled ? 'green' : 'yellow'"
           border-right
           :error="latestError('brain')"
         >
@@ -115,6 +125,10 @@ const deliveryColors: Record<DanmakuDelivery, string> = {
           <Text dim-color>启动于 {{ formatTime(state.startedAtMs) }}</Text>
         </DashboardPanel>
       </Box>
+    </Box>
+
+    <Box :margin-top="1">
+      <Text dim-color>Ctrl+C 退出 · S 切换真实发送</Text>
     </Box>
   </Box>
 </template>

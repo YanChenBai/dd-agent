@@ -24,7 +24,9 @@ const brain = createBrain(memory, {
   roomInfo,
   streamerAliases: env.LIVE_STREAMER_ALIASES,
 });
-const dashboard = createDashboard(roomInfo);
+const dashboard = createDashboard(roomInfo, {
+  sendDanmakuEnabled: env.SEND_DANMAKU === 1,
+});
 let stopping = false;
 
 dashboard.mount();
@@ -59,7 +61,7 @@ vision.onError(error => {
 });
 
 brain.onDanmaku(event => {
-  const willSend = env.SEND_DANMAKU === 1;
+  const willSend = dashboard.state.sendDanmakuEnabled;
   const entries = dashboard.addDanmaku(event, willSend);
   if (willSend) {
     void sendDanmaku(event.messages)

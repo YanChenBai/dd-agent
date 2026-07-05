@@ -4,6 +4,8 @@ import { Box, Text } from '@vue-tui/runtime';
 defineProps<{
   title: string;
   accent: string;
+  status?: string;
+  statusColor?: string;
   error?: string;
   borderRight?: boolean;
 }>();
@@ -22,7 +24,9 @@ defineProps<{
     :padding-x="1"
     overflow="hidden"
   >
-    <Text :color="accent" bold>{{ title }}</Text>
+    <Text :color="accent" bold
+      >{{ title }}<Text v-if="status" :color="statusColor"> · {{ status }}</Text></Text
+    >
     <Text v-if="error" color="red" wrap="truncate-end">错误：{{ error }}</Text>
     <slot />
   </Box>
