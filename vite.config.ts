@@ -1,9 +1,9 @@
 import vue from '@vitejs/plugin-vue';
 import { vueTui } from '@vue-tui/vite';
-import { defineConfig } from 'vite-plus';
+import { defineConfig, lazyPlugins } from 'vite-plus';
 
 export default defineConfig({
-  plugins: [vue(), vueTui({ entry: 'src/index.ts' })],
+  plugins: lazyPlugins(() => [vue(), vueTui({ entry: 'src/index.ts' }) as any]),
   build: {
     rolldownOptions: {
       output: {

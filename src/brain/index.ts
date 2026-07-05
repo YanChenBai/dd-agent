@@ -12,6 +12,7 @@ const danmakuOutput = Output.object({
   schema: z.array(z.string().trim().min(1).max(40)).max(2),
 });
 const MAX_CONTEXT_IMAGES = 3;
+const MAX_HISTORY_TURNS = 6;
 
 const provider = createOpenAICompatible({
   name: 'openrouter',
@@ -23,6 +24,7 @@ const provider = createOpenAICompatible({
 export function createBrain(memory: Memory, context: BrainContext) {
   const emitter = createNanoEvents<BrainEvents>();
   const agent = createDanmakuAgent();
+  const history: Array<{ user: string; assistant: string }> = [];
   let queue = Promise.resolve();
 
   return {
@@ -42,14 +44,19 @@ export function createBrain(memory: Memory, context: BrainContext) {
             return;
           }
 
+          const prompt = createWindowPrompt(context, range, hearing);
           const result = await agent.generate({
             messages: [
+              ...history.flatMap(turn => [
+                { role: 'user' as const, content: turn.user },
+                { role: 'assistant' as const, content: turn.assistant },
+              ]),
               {
                 role: 'user',
                 content: [
                   {
                     type: 'text',
-                    text: createWindowPrompt(context, range, hearing),
+                    text: prompt,
                   },
                   ...vision.map(record => ({
                     type: 'file' as const,
@@ -60,6 +67,14 @@ export function createBrain(memory: Memory, context: BrainContext) {
               },
             ],
           });
+
+          history.push({
+            user: prompt,
+            assistant: JSON.stringify(result.output),
+          });
+          if (history.length > MAX_HISTORY_TURNS) {
+            history.shift();
+          }
 
           emitter.emit('danmaku', {
             ...range,
