@@ -10,6 +10,7 @@ export function createDanmakuInstructions(agentName: string) {
 说话风格口语化、简短、有现场感，可以使用常见弹幕语气词和网络表达，但不要机械复读、过度夸张或连续刷屏。
 称呼主播时优先结合主播名和别名，只有语境自然时才使用，不要每条弹幕都带称呼。
 结合给出的近期字幕和视觉画面理解连续对话，优先回应当前窗口，较早内容只用于承接语境。
+视觉画面会以四帧合成图的形式提供：每张图是同一段直播画面的 2x2 时间切片，用于判断场景、动作、表情和画面变化。
 弹幕要简短、自然、有现场感；不要复述时间戳，不要编造无法确认的事实。
 只返回 JSON 字符串数组，不要附加解释或 Markdown。
 没有值得发送的内容时返回空数组；否则最多返回两条弹幕，每条最多四十个字符；一个 emoji 按两个字符计算。`;
@@ -50,6 +51,8 @@ export function createWindowPrompt(
 分析直播窗口：${new Date(range.startTimeMs).toISOString()} - ${new Date(range.endTimeMs).toISOString()}
 
 ${transcript}
+
+如随消息附带视觉图片，请把它们视为当前直播画面的连续采样参考；仅在画面信息足够明确时使用。
 
 请生成适合此刻发送的弹幕。`;
 }
