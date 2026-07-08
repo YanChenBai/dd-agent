@@ -17,9 +17,6 @@ importers:
       '@viyuni/bevent-relay':
         specifier: ^0.0.4
         version: 0.0.4(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)(buffer@6.0.3)(events@3.3.0)(pako@2.2.0)
-      '@vue-tui/runtime':
-        specifier: 0.1.1
-        version: 0.1.1(vue@3.5.39(typescript@6.0.3))
       ai:
         specifier: ^7.0.14
         version: 7.0.15(zod@4.4.3)
@@ -41,9 +38,6 @@ importers:
       sherpa-onnx-node:
         specifier: ^1.13.3
         version: 1.13.3
-      vue:
-        specifier: ^3.5.39
-        version: 3.5.39(typescript@6.0.3)
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -57,12 +51,6 @@ importers:
       '@typescript/native-preview':
         specifier: 7.0.0-dev.20260509.2
         version: 7.0.0-dev.20260509.2
-      '@vitejs/plugin-vue':
-        specifier: ^6.0.7
-        version: 6.0.7(vite@8.1.3(@types/node@25.9.4)(jiti@2.7.0)(yaml@2.9.0))(vue@3.5.39(typescript@6.0.3))
-      '@vue-tui/vite':
-        specifier: ^0.2.0
-        version: 0.2.0(@vitejs/plugin-vue@6.0.7(vite@8.1.3(@types/node@25.9.4)(jiti@2.7.0)(yaml@2.9.0))(vue@3.5.39(typescript@6.0.3)))(@vue-tui/runtime@0.1.1(vue@3.5.39(typescript@6.0.3)))(vite@8.1.3(@types/node@25.9.4)(jiti@2.7.0)(yaml@2.9.0))
       bumpp:
         specifier: ^11.1.0
         version: 11.1.0
@@ -3737,12 +3725,6 @@ snapshots:
       - unrun
       - yaml
 
-  '@vitejs/plugin-vue@6.0.7(vite@8.1.3(@types/node@25.9.4)(jiti@2.7.0)(yaml@2.9.0))(vue@3.5.39(typescript@6.0.3))':
-    dependencies:
-      '@rolldown/pluginutils': 1.0.1
-      vite: 8.1.3(@types/node@25.9.4)(jiti@2.7.0)(yaml@2.9.0)
-      vue: 3.5.39(typescript@6.0.3)
-
   '@vitest/browser-preview@4.1.9(@types/node@24.13.2)(jiti@2.7.0)(typescript@5.9.3)(vitest@4.1.9)(yaml@2.9.0)':
     dependencies:
       '@testing-library/dom': 10.4.1
@@ -4117,13 +4099,6 @@ snapshots:
       - unplugin-unused
       - unrun
       - yaml
-
-  '@vue-tui/vite@0.2.0(@vitejs/plugin-vue@6.0.7(vite@8.1.3(@types/node@25.9.4)(jiti@2.7.0)(yaml@2.9.0))(vue@3.5.39(typescript@6.0.3)))(@vue-tui/runtime@0.1.1(vue@3.5.39(typescript@6.0.3)))(vite@8.1.3(@types/node@25.9.4)(jiti@2.7.0)(yaml@2.9.0))':
-    dependencies:
-      '@vue-tui/runtime': 0.1.1(vue@3.5.39(typescript@6.0.3))
-    optionalDependencies:
-      '@vitejs/plugin-vue': 6.0.7(vite@8.1.3(@types/node@25.9.4)(jiti@2.7.0)(yaml@2.9.0))(vue@3.5.39(typescript@6.0.3))
-      vite: 8.1.3(@types/node@25.9.4)(jiti@2.7.0)(yaml@2.9.0)
 
   '@vue/compiler-core@3.5.39':
     dependencies:

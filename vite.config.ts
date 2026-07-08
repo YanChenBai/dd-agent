@@ -1,16 +1,6 @@
-import vue from '@vitejs/plugin-vue';
-import { vueTui } from '@vue-tui/vite';
-import { defineConfig, lazyPlugins } from 'vite-plus';
+import { defineConfig } from 'vite-plus';
 
 export default defineConfig({
-  plugins: lazyPlugins(() => [vue(), vueTui({ entry: 'src/index.ts' }) as any]),
-  build: {
-    rolldownOptions: {
-      output: {
-        minify: false,
-      },
-    },
-  },
   staged: {
     '*': 'vp check --fix',
   },
@@ -27,22 +17,29 @@ export default defineConfig({
     rules: { 'vite-plus/prefer-vite-plus-imports': 'error' },
     options: { typeAware: true, typeCheck: true },
   },
+  pack: {
+    entry: 'src/index.ts',
+    format: ['esm'],
+    dts: false,
+    outDir: 'dist',
+    sourcemap: true,
+  },
   run: {
     cache: true,
     tasks: {
       build: {
-        command: 'vp build',
+        command: 'vp pack',
       },
       dev: {
         cache: false,
-        command: 'vp dev',
+        command: 'node --import @oxc-node/core/register --watch --env-file=.env dist/index.mjs',
       },
       ready: {
-        command: 'vp check && vp test && vp build',
+        command: 'vp check && vp test && vp pack',
       },
       start: {
         cache: false,
-        command: 'node --import @oxc-node/core/register --env-file=.env dist/index.js',
+        command: 'node --import @oxc-node/core/register --env-file=.env dist/index.mjs',
         dependsOn: ['build'],
       },
     },
