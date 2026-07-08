@@ -32,7 +32,7 @@ export default defineConfig({
       },
       dev: {
         cache: false,
-        command: 'node --import @oxc-node/core/register --watch --env-file=.env dist/index.mjs',
+        command: 'node --import @oxc-node/core/register --watch --env-file=.env src/index.ts',
       },
       ready: {
         command: 'vp check && vp test && vp pack',
