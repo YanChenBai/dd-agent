@@ -10,12 +10,13 @@
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.5",
     "@t3-oss/env-core": "^0.13.11",
-    "@viyuni/bevent-relay": "^0.0.4",
     "ai": "^7.0.14",
     "dotenv": "^17.4.2",
     "ky": "^2.0.2",
     "nanoevents": "^9.1.0",
     "p-queue": "^9.3.1",
+    "puppeteer": "^25.3.0",
+    "puppeteer-stream": "^3.0.23",
     "sharp": "^0.35.3",
     "sherpa-onnx-node": "^1.13.3",
     "zod": "^4.4.3"
@@ -26,8 +27,8 @@
     "@typescript/native-preview": "7.0.0-dev.20260509.2",
     "bumpp": "^11.1.0",
     "typescript": "^6.0.3",
-    "vite-plus": "^0.2.2",
-    "vitest": "^4.1.9"
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
   },
   "engines": {
     "node": ">=22.12.0"

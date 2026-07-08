@@ -1,6 +1,6 @@
 import { createNanoEvents } from 'nanoevents';
 
-import type { Blive } from '../blive-stream/types.ts';
+import type { Blive } from '../blive/types.ts';
 import { env } from '../env.ts';
 import {
   createCircularBuffer,

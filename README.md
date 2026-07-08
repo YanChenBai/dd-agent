@@ -53,14 +53,12 @@ Bilibili 直播流
 
    至少需要填写：
 
-   | 变量                  | 说明                                        |
-   | --------------------- | ------------------------------------------- |
-   | `LIVE_ROOM_ID`        | Bilibili 直播间号，运行时直播间必须正在开播 |
-   | `AI_MODEL`            | OpenAI 兼容服务提供的模型 ID                |
-   | `AI_API_KEY`          | 模型服务 API Key                            |
-   | `AI_BASE_URL`         | OpenAI 兼容 API 地址                        |
-   | `LOGIN_SYNC_URL`      | Bilibili 登录凭据同步服务的 WebSocket 地址  |
-   | `LOGIN_SYNC_PASSWORD` | 登录同步服务的共享密码                      |
+   | 变量           | 说明                                        |
+   | -------------- | ------------------------------------------- |
+   | `LIVE_ROOM_ID` | Bilibili 直播间号，运行时直播间必须正在开播 |
+   | `AI_MODEL`     | OpenAI 兼容服务提供的模型 ID                |
+   | `AI_API_KEY`   | 模型服务 API Key                            |
+   | `AI_BASE_URL`  | OpenAI 兼容 API 地址                        |
 
 4. 启动 Agent：
 
@@ -70,7 +68,7 @@ Bilibili 直播流
 
    `vpr start` 会先生成面向 Node.js 的生产构建，再运行 `dist/index.js`，不会启用热更新。开发时可使用 `vpr dev` 启动带热更新的 Vite 开发模式。
 
-   按 `Ctrl+C` 安全退出。默认 `SEND_DANMAKU=0`，只预览生成的弹幕；确认登录同步配置可用后，将其改为 `1` 才会真正发送。
+   按 `Ctrl+C` 安全退出。默认 `SEND_DANMAKU=0`，只预览生成的弹幕；确认浏览器登录态可用后，将其改为 `1` 才会真正发送。
 
 ## 常用配置
 
@@ -81,6 +79,7 @@ Bilibili 直播流
 | `AGENT_NAME`              | `DD`     | 主播称呼 Agent 时使用的名字        |
 | `AGENT_STOP_AFTER_MS`     | `0`      | 自动停止时间；`0` 表示持续运行     |
 | `SEND_DANMAKU`            | `0`      | `1` 为发送弹幕，`0` 为仅预览       |
+| `BROWSER_USER_DATA_DIR`   | 空       | Bilibili 登录态使用的浏览器目录    |
 | `LIVE_STREAMER_ALIASES`   | 空       | 主播别名，多个值使用英文逗号分隔   |
 | `MEMORY_RETENTION_MS`     | `600000` | 语音和视觉记录的保留时长           |
 | `BRAIN_CONTEXT_WINDOW_MS` | `120000` | 每次请求模型时使用的近期上下文长度 |
@@ -108,6 +107,6 @@ vpr ready # 依次执行检查、测试和构建
 
 ## 安全提示
 
-- 不要提交 `.env`、API Key、Cookie 或登录同步密码。
+- 不要提交 `.env`、API Key、Cookie 或浏览器用户数据目录。
 - 首次使用请保持 `SEND_DANMAKU=0`，检查生成质量和频率后再开启发送。
 - 使用自动弹幕前，请自行确认符合平台规则及直播间规范。
