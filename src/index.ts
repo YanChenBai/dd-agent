@@ -4,8 +4,8 @@ import { createBrain } from './brain/index.ts';
 import { sendDanmaku, stopDanmakuSender } from './danmaku/index.ts';
 import { env } from './env.ts';
 import { startHearing } from './hearing/index.ts';
+import { createLogger } from './logger/index.ts';
 import { createMemory } from './memory/index.ts';
-import { createDashboard } from './tui/controller.ts';
 import { startVision } from './vision/index.ts';
 
 const stopAfterMs = env.AGENT_STOP_AFTER_MS;
@@ -24,32 +24,31 @@ const brain = createBrain(memory, {
   roomInfo,
   streamerAliases: env.LIVE_STREAMER_ALIASES,
 });
-const dashboard = createDashboard(roomInfo, {
-  onExit: stop,
+const logger = createLogger(roomInfo, {
   sendDanmakuEnabled: env.SEND_DANMAKU === 1,
 });
 let stopping = false;
 
-dashboard.mount();
+logger.mount();
 
 hearing.onFinal(event => {
-  dashboard.addHearing(event);
+  logger.hearing(event);
   memory.addHearing(event);
 });
 
 blive.onError(error => {
-  dashboard.addError('room', error);
+  logger.error('room', error);
 });
 
 blive.onStderr(message => {
   const value = message.trim();
   if (value && !value.includes('deprecated pixel format used')) {
-    dashboard.addError('room', `FFmpeg: ${value}`);
+    logger.ffmpeg(value);
   }
 });
 
 vision.onImage(event => {
-  dashboard.addVision(event);
+  logger.vision(event);
   memory.addVision(event);
   brain.queueDanmaku({
     startTimeMs: event.startTimeMs,
@@ -58,31 +57,31 @@ vision.onImage(event => {
 });
 
 vision.onError(error => {
-  dashboard.addError('vision', error);
+  logger.error('vision', error);
 });
 
 brain.onDanmaku(event => {
-  const willSend = dashboard.state.sendDanmakuEnabled;
-  const entries = dashboard.addDanmaku(event, willSend);
+  const willSend = logger.state.sendDanmakuEnabled;
+  const entries = logger.danmaku(event, willSend);
   if (willSend) {
     void sendDanmaku(event.messages)
       .then(() => {
-        dashboard.setDanmakuDelivery(entries, 'sent');
+        logger.danmakuDelivery(entries, 'sent');
       })
       .catch(error => {
-        dashboard.setDanmakuDelivery(entries, 'failed');
-        dashboard.addError('brain', error);
+        logger.danmakuDelivery(entries, 'failed');
+        logger.error('brain', error);
       });
   }
 });
 
 brain.onError(error => {
-  dashboard.addError('brain', error);
+  logger.error('brain', error);
 });
 
 blive.onClose((code, signal) => {
   if (!stopping) {
-    dashboard.addError('room', `FFmpeg 意外关闭（code=${String(code)}, signal=${String(signal)}）`);
+    logger.error('ffmpeg', `意外关闭（code=${String(code)}, signal=${String(signal)}）`);
   }
 });
 
@@ -101,7 +100,7 @@ async function stop() {
 
   stopping = true;
   stopDanmakuSender();
-  dashboard.unmount();
+  logger.unmount();
   await vision.stop();
   await hearing.stop();
   blive.stop();
