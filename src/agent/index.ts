@@ -1,7 +1,6 @@
 import { fetchRoomUserInfo } from '../bili-api/index.ts';
-import { createBlive } from '../blive-stream/index.ts';
+import { createBlive } from '../blive/index.ts';
 import { createBrain } from '../brain/index.ts';
-import { sendDanmaku, stopDanmakuSender } from '../danmaku/index.ts';
 import { env } from '../env.ts';
 import { startHearing } from '../hearing/index.ts';
 import { createLogger } from '../logger/index.ts';
@@ -70,7 +69,8 @@ export async function startAgent(roomId: number, options: AgentOptions = {}) {
     const willSend = logger.state.sendDanmakuEnabled;
     const entries = logger.danmaku(event, willSend);
     if (willSend) {
-      void sendDanmaku(event.messages)
+      void blive
+        .sendDanmaku(event.messages)
         .then(() => {
           logger.danmakuDelivery(entries, 'sent');
         })
@@ -109,11 +109,10 @@ export async function startAgent(roomId: number, options: AgentOptions = {}) {
       clearTimeout(stopTimer);
       stopTimer = undefined;
     }
-    stopDanmakuSender();
     logger.unmount();
     await vision.stop();
     await hearing.stop();
-    blive.stop();
+    await blive.stop();
     await brain.idle();
   }
 

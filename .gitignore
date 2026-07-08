@@ -15,6 +15,7 @@ dist-ssr
 .env.*
 !.env.example
 models/
+.browser-user-data/
 
 # Editor directories and files
 .vscode/*

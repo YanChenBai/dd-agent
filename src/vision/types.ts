@@ -1,4 +1,4 @@
-import type { MediaTiming } from '../blive-stream/types.ts';
+import type { MediaTiming } from '../blive/types.ts';
 
 export interface VisionEvents {
   image: (event: VisionImageEvent) => void;

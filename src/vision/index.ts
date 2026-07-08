@@ -1,7 +1,7 @@
 import { createNanoEvents } from 'nanoevents';
 import sharp from 'sharp';
 
-import type { Blive } from '../blive-stream/types.ts';
+import type { Blive } from '../blive/types.ts';
 import type { VisionEvents, VisionFrame, VisionOptions } from './types.ts';
 
 const FRAME_COUNT = 4;

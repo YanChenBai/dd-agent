@@ -37,6 +37,8 @@ export const env = createEnv({
     AGENT_STOP_AFTER_MS: z.coerce.number().nonnegative().default(0),
     LIVE_ROOM_ID: positiveInteger.default(82_568),
     SEND_DANMAKU: binaryNumber.default(0),
+    BROWSER_USER_DATA_DIR: z.string().default(resolve(appDir, '.browser-user-data')),
+    BILIBILI_LOGIN_TIMEOUT_MS: positiveInteger.default(5 * 60 * 1_000),
 
     // OpenAI-compatible AI provider
     AI_MODEL: z.string(),
@@ -67,10 +69,6 @@ export const env = createEnv({
     VAD_MIN_SPEECH: z.coerce.number().nonnegative().default(0.25),
     VAD_MIN_SILENCE: z.coerce.number().nonnegative().default(0.5),
     VAD_WINDOW_SIZE: positiveInteger.default(process.env.VAD_KIND === 'ten' ? 256 : 512),
-
-    // Bilibili login synchronization
-    LOGIN_SYNC_URL: z.string(),
-    LOGIN_SYNC_PASSWORD: z.string(),
   },
   runtimeEnv: nodeProcess.env,
   emptyStringAsUndefined: true,
