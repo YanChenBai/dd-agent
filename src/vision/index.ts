@@ -1,12 +1,18 @@
 import { createNanoEvents } from 'nanoevents';
 import sharp from 'sharp';
 
-import type { Blive } from '../blive/types.ts';
+import type { Blive } from '@/blive/types.ts';
+import { formatBytes } from '@/logger/format.ts';
+import { createLogger } from '@/logger/index.ts';
+
 import type { VisionEvents, VisionFrame, VisionOptions } from './types.ts';
+
+export * from './types.ts';
 
 const FRAME_COUNT = 4;
 const DEFAULT_INTERVAL_MS = 20_000;
 const BACKGROUND = { r: 0, g: 0, b: 0 } as const;
+const logger = createLogger({ prefix: 'vision', prefixColor: 'magenta' });
 
 /** Keeps the four most recent live frames and periodically emits a 2x2 JPEG contact sheet. */
 export function startVision(blive: Blive, options: VisionOptions = {}) {
@@ -38,19 +44,23 @@ export function startVision(blive: Blive, options: VisionOptions = {}) {
     composing = mergeFourImages(snapshot.map(frame => frame.buffer))
       .then(buffer => {
         if (!stopped) {
-          emitter.emit('image', {
+          const event = {
             buffer,
             frames: snapshot,
             startTimeMs: snapshot[0]!.receivedAtMs,
             endTimeMs: snapshot.at(-1)!.receivedAtMs,
             mediaStartMs: snapshot[0]!.mediaStartMs,
             mediaEndMs: snapshot.at(-1)!.mediaEndMs,
-          });
+          };
+          logger.info(`${event.frames.length} 帧，${formatBytes(event.buffer.byteLength)}`);
+          emitter.emit('image', event);
         }
       })
       .catch(error => {
         if (!stopped) {
-          emitter.emit('error', toError(error));
+          const value = toError(error);
+          logger.error(value);
+          emitter.emit('error', value);
         }
       })
       .finally(() => {
@@ -58,19 +68,29 @@ export function startVision(blive: Blive, options: VisionOptions = {}) {
       });
   }, intervalMs);
 
-  return {
-    onImage: (callback: VisionEvents['image']) => emitter.on('image', callback),
-    onError: (callback: VisionEvents['error']) => emitter.on('error', callback),
-    async stop() {
-      if (stopped) {
-        return;
-      }
+  function onImage(callback: VisionEvents['image']) {
+    return emitter.on('image', callback);
+  }
 
-      stopped = true;
-      clearInterval(timer);
-      unbindImage();
-      await composing;
-    },
+  function onError(callback: VisionEvents['error']) {
+    return emitter.on('error', callback);
+  }
+
+  async function stop(): Promise<void> {
+    if (stopped) {
+      return;
+    }
+
+    stopped = true;
+    clearInterval(timer);
+    unbindImage();
+    await composing;
+  }
+
+  return {
+    onImage,
+    onError,
+    stop,
   };
 }
 

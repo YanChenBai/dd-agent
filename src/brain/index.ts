@@ -1,103 +1,322 @@
+import { readFileSync } from 'node:fs';
+
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { Output, ToolLoopAgent, stepCountIs } from 'ai';
 import { createNanoEvents } from 'nanoevents';
 import { z } from 'zod';
 
-import { env } from '../env.ts';
-import type { Memory, TimeRange } from '../memory/types.ts';
-import { createDanmakuInstructions, createWindowPrompt } from './prompt.ts';
-import type { BrainContext, BrainEvents } from './types.ts';
+import type { DDConfig } from '@/config/index.ts';
+import { createLogger } from '@/logger/index.ts';
+import type { Memory, MemoryRecord, TimeRange } from '@/memory/types.ts';
+import type { DDMode } from '@/types/index.ts';
+import { createEventHandlers } from '@/utils/events.ts';
 
-const danmakuOutput = Output.object({
-  schema: z.array(z.string().trim().min(1).max(40)).max(2),
+import { createBrainInstructions, createWindowPrompt } from './prompt.ts';
+import type {
+  BrainContext,
+  BrainEvents,
+  BrainOutput,
+  BrainResultEvent,
+  ExploreModeOutput,
+} from './types.ts';
+
+export * from './types.ts';
+export type { DDMode } from '@/types/index.ts';
+
+const danmakusSchema = z.array(z.string().trim().min(1).max(40)).max(1);
+const singleOutput = Output.object({
+  schema: z.object({
+    danmakus: danmakusSchema,
+  }),
 });
-const MAX_CONTEXT_IMAGES = 3;
-const MAX_HISTORY_TURNS = 6;
-
-const provider = createOpenAICompatible({
-  name: 'openrouter',
-  apiKey: env.AI_API_KEY,
-  baseURL: env.AI_BASE_URL,
-  supportsStructuredOutputs: true,
+const exploreOutput = Output.object({
+  schema: z
+    .object({
+      danmakus: danmakusSchema,
+      shouldContinue: z.boolean(),
+      watchDeltaMs: z
+        .number()
+        .int()
+        .min(-60 * 60 * 1_000)
+        .max(60 * 60 * 1_000),
+      reason: z.string().trim().min(1).max(200),
+    })
+    .superRefine((value, context) => {
+      if (!value.shouldContinue && value.watchDeltaMs !== 0) {
+        context.addIssue({
+          code: 'custom',
+          path: ['watchDeltaMs'],
+          message: 'watchDeltaMs must be 0 when shouldContinue is false',
+        });
+      }
+    }),
 });
 
-export function createBrain(memory: Memory, context: BrainContext) {
+const logger = createLogger({ prefix: 'brain', prefixColor: 'green' });
+
+export function createBrain(
+  memory: Memory,
+  context: BrainContext,
+  config: DDConfig,
+  mode: DDMode = 'single',
+) {
   const emitter = createNanoEvents<BrainEvents>();
-  const agent = createDanmakuAgent();
+  const eventHandlers = createEventHandlers(emitter);
+  const agent = createBrainAgent(config, context, mode);
   const history: Array<{ user: string; assistant: string }> = [];
   let queue = Promise.resolve();
+  let timer: NodeJS.Timeout | undefined;
+  let lastPollTimeMs = 0;
+  let pendingPollEndTimeMs: number | undefined;
+  let pollQueued = false;
+  let latestResult: BrainResultEvent | undefined;
+  let lastActivityTimeMs = Date.now();
+  let plannedWatchEndAt: number | undefined;
+
+  function queryWindow(range: TimeRange) {
+    const records = memory.query({
+      startTimeMs: Math.max(0, range.endTimeMs - config.memory.brainContextWindowMs),
+      endTimeMs: range.endTimeMs,
+    });
+    const hearing: Extract<MemoryRecord, { type: 'hearing' }>[] = [];
+    const vision: Extract<MemoryRecord, { type: 'vision' }>[] = [];
+
+    for (const record of records) {
+      if (record.type === 'hearing') {
+        hearing.push(record);
+      } else {
+        vision.push(record);
+      }
+    }
+
+    return {
+      hearing,
+      vision: vision.slice(-config.memory.brainContextImages),
+      hasFreshRecords: records.some(record => record.endTimeMs > range.startTimeMs),
+      latestActivityTimeMs: records.reduce(
+        (latest, record) => Math.max(latest, record.endTimeMs),
+        0,
+      ),
+    };
+  }
+
+  function createPollContent(
+    range: TimeRange,
+    hearing: Extract<MemoryRecord, { type: 'hearing' }>[],
+    vision: Extract<MemoryRecord, { type: 'vision' }>[],
+  ) {
+    const prompt = createWindowPrompt(range, hearing, mode, {
+      inactiveMs: Math.max(0, range.endTimeMs - lastActivityTimeMs),
+      remainingWatchMs:
+        plannedWatchEndAt === undefined
+          ? undefined
+          : Math.max(0, plannedWatchEndAt - range.endTimeMs),
+    });
+    const content = [
+      {
+        type: 'text' as const,
+        text: prompt,
+      },
+      ...vision.flatMap(record => [
+        {
+          type: 'text' as const,
+          text:
+            record.endTimeMs > range.startTimeMs
+              ? '以下是当前轮询窗口内的新视觉画面：'
+              : '以下是较早的视觉上下文，仅用于理解，不要单独回应：',
+        },
+        {
+          type: 'file' as const,
+          data: readFileSync(record.filePath).toString('base64'),
+          mediaType: 'image/jpeg' as const,
+        },
+      ]),
+    ];
+
+    return { prompt, content };
+  }
+
+  async function processPoll(endTimeMs: number): Promise<void> {
+    const range = {
+      startTimeMs: lastPollTimeMs,
+      endTimeMs,
+    };
+    lastPollTimeMs = endTimeMs;
+
+    const { hearing, vision, hasFreshRecords, latestActivityTimeMs } = queryWindow(range);
+    if (hasFreshRecords) {
+      lastActivityTimeMs = Math.max(lastActivityTimeMs, latestActivityTimeMs);
+    }
+    if (
+      (mode === 'single' && (!hasFreshRecords || (hearing.length === 0 && vision.length === 0))) ||
+      (!hasFreshRecords && range.endTimeMs <= lastActivityTimeMs)
+    ) {
+      return;
+    }
+
+    const { prompt, content } = createPollContent(range, hearing, vision);
+    const result = await agent.generate({
+      messages: [
+        ...history.flatMap(turn => [
+          { role: 'user' as const, content: turn.user },
+          { role: 'assistant' as const, content: turn.assistant },
+        ]),
+        {
+          role: 'user',
+          content,
+        },
+      ],
+    });
+
+    const output = result.output as BrainOutput;
+    history.push({
+      user: prompt,
+      assistant: JSON.stringify(output),
+    });
+    if (history.length > config.agent.danmakuHistoryTurns) {
+      history.shift();
+    }
+
+    emitter.emit('danmaku', {
+      ...range,
+      messages: output.danmakus,
+    });
+    latestResult = { ...range, ...output };
+    emitter.emit('result', latestResult);
+
+    if (mode === 'explore') {
+      emitDecision(range, output as ExploreModeOutput);
+    }
+  }
+
+  function emitDecision(range: TimeRange, decision: ExploreModeOutput): void {
+    const decisionEvent = {
+      ...range,
+      shouldContinue: decision.shouldContinue,
+      watchDeltaMs: decision.watchDeltaMs,
+      reason: decision.reason,
+    };
+    emitter.emit('decision', decisionEvent);
+    if (decision.shouldContinue) {
+      emitter.emit('continueWatching', {
+        ...range,
+        watchDeltaMs: decision.watchDeltaMs,
+        reason: decision.reason,
+      });
+    } else {
+      emitter.emit('switchRoom', {
+        ...range,
+        reason: decision.reason,
+      });
+    }
+  }
+
+  function queuePoll(endTimeMs: number): void {
+    pendingPollEndTimeMs = Math.max(pendingPollEndTimeMs ?? 0, endTimeMs);
+    if (pollQueued) {
+      return;
+    }
+
+    pollQueued = true;
+    queue = queue
+      .then(async () => {
+        const pollEndTimeMs = pendingPollEndTimeMs;
+        pendingPollEndTimeMs = undefined;
+        if (pollEndTimeMs === undefined) {
+          return;
+        }
+        await processPoll(pollEndTimeMs);
+      })
+      .catch(error => {
+        const value = error instanceof Error ? error : new Error(String(error));
+        logger.error(value);
+        emitter.emit('error', value);
+      })
+      .finally(() => {
+        pollQueued = false;
+        if (pendingPollEndTimeMs !== undefined) {
+          queuePoll(pendingPollEndTimeMs);
+        }
+      });
+  }
+
+  function start(): void {
+    if (timer) {
+      return;
+    }
+
+    const now = Date.now();
+    lastActivityTimeMs = now;
+    lastPollTimeMs = Math.max(0, now - config.memory.brainContextWindowMs);
+    queuePoll(now);
+    timer = setInterval(() => {
+      queuePoll(Date.now());
+    }, config.agent.danmakuIntervalMs);
+  }
+
+  function stop(): void {
+    if (!timer) {
+      return;
+    }
+
+    clearInterval(timer);
+    timer = undefined;
+  }
+
+  function getLatestDecision() {
+    if (mode !== 'explore' || !latestResult || !('shouldContinue' in latestResult)) {
+      return undefined;
+    }
+
+    return {
+      startTimeMs: latestResult.startTimeMs,
+      endTimeMs: latestResult.endTimeMs,
+      shouldContinue: latestResult.shouldContinue,
+      watchDeltaMs: latestResult.watchDeltaMs,
+      reason: latestResult.reason,
+    };
+  }
+
+  function getLatestResult() {
+    return latestResult;
+  }
+
+  function setPlannedWatchEndAt(endAt: number | undefined): void {
+    plannedWatchEndAt = endAt;
+  }
+
+  function idle(): Promise<void> {
+    return queue;
+  }
 
   return {
-    queueDanmaku(range: TimeRange) {
-      queue = queue
-        .then(async () => {
-          const records = memory.query({
-            startTimeMs: Math.max(0, range.endTimeMs - env.BRAIN_CONTEXT_WINDOW_MS),
-            endTimeMs: range.endTimeMs,
-          });
-          const hearing = records.filter(record => record.type === 'hearing');
-          const vision = records
-            .filter(record => record.type === 'vision')
-            .slice(-MAX_CONTEXT_IMAGES);
-
-          if (hearing.length === 0 && vision.length === 0) {
-            return;
-          }
-
-          const prompt = createWindowPrompt(context, range, hearing);
-          const result = await agent.generate({
-            messages: [
-              ...history.flatMap(turn => [
-                { role: 'user' as const, content: turn.user },
-                { role: 'assistant' as const, content: turn.assistant },
-              ]),
-              {
-                role: 'user',
-                content: [
-                  {
-                    type: 'text',
-                    text: prompt,
-                  },
-                  ...vision.map(record => ({
-                    type: 'file' as const,
-                    data: record.buffer.toString('base64'),
-                    mediaType: 'image/jpeg',
-                  })),
-                ],
-              },
-            ],
-          });
-
-          history.push({
-            user: prompt,
-            assistant: JSON.stringify(result.output),
-          });
-          if (history.length > MAX_HISTORY_TURNS) {
-            history.shift();
-          }
-
-          emitter.emit('danmaku', {
-            ...range,
-            messages: result.output,
-          });
-        })
-        .catch(error => {
-          emitter.emit('error', error instanceof Error ? error : new Error(String(error)));
-        });
-    },
-    onDanmaku: (callback: BrainEvents['danmaku']) => emitter.on('danmaku', callback),
-    onError: (callback: BrainEvents['error']) => emitter.on('error', callback),
-    idle() {
-      return queue;
-    },
+    start,
+    stop,
+    onDanmaku: eventHandlers.onDanmaku,
+    onDecision: eventHandlers.onDecision,
+    onContinueWatching: eventHandlers.onContinueWatching,
+    onSwitchRoom: eventHandlers.onSwitchRoom,
+    onResult: eventHandlers.onResult,
+    onError: eventHandlers.onError,
+    getLatestDecision,
+    getLatestResult,
+    setPlannedWatchEndAt,
+    idle,
   };
 }
 
-function createDanmakuAgent() {
+function createBrainAgent(config: DDConfig, context: BrainContext, mode: DDMode) {
+  const provider = createOpenAICompatible({
+    name: 'openrouter',
+    apiKey: config.ai.apiKey,
+    baseURL: config.ai.baseUrl,
+    supportsStructuredOutputs: true,
+  });
+
   return new ToolLoopAgent({
-    model: provider.chatModel(env.AI_MODEL),
-    instructions: createDanmakuInstructions(env.AGENT_NAME),
-    output: danmakuOutput,
+    model: provider.chatModel(config.ai.model),
+    instructions: createBrainInstructions(config.agent.name, context, mode),
+    output: mode === 'explore' ? exploreOutput : singleOutput,
     providerOptions: {
       openrouter: {
         provider: {

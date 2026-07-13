@@ -1,105 +1,63 @@
 import { styleText } from 'node:util';
 
-import type { RoomUserInfo } from '../bili-api/types.ts';
-import type { DanmakuEvent } from '../brain/types.ts';
-import type { HearingFinalEvent } from '../hearing/types.ts';
-import type { VisionImageEvent } from '../vision/types.ts';
-import { formatBytes, formatTimeRange } from './format.ts';
+import { createConsola } from 'consola';
+import type { ConsolaInstance, ConsolaOptions, LogType } from 'consola';
 
-export type LoggerModule = 'brain' | 'ffmpeg' | 'hearing' | 'room' | 'vision';
-export type DanmakuDelivery = 'preview' | 'pending' | 'sent' | 'failed';
+type LogMethod = Exclude<LogType, 'silent'>;
 type TextStyle = Parameters<typeof styleText>[0];
 
-export interface LoggerOptions {
-  sendDanmakuEnabled?: boolean;
+export type LoggerOptions = Partial<ConsolaOptions> & {
+  fancy?: boolean;
+  prefix?: string;
+  prefixColor?: TextStyle;
+};
+
+const LOG_METHODS = new Set<LogMethod>([
+  'fatal',
+  'error',
+  'warn',
+  'log',
+  'info',
+  'success',
+  'fail',
+  'ready',
+  'start',
+  'box',
+  'debug',
+  'trace',
+  'verbose',
+]);
+
+function isLogMethod(property: PropertyKey): property is LogMethod {
+  return typeof property === 'string' && LOG_METHODS.has(property as LogMethod);
 }
 
-export interface LoggerDanmakuEntry {
-  id: number;
-  message: string;
-}
+export function createLogger(options: LoggerOptions = {}): ConsolaInstance {
+  const { prefix, prefixColor = 'cyan', fancy: _fancy, ...consolaOptions } = options;
 
-const MODULE_COLORS = {
-  brain: 'green',
-  ffmpeg: 'yellow',
-  hearing: 'cyan',
-  room: 'blue',
-  vision: 'magenta',
-} as const satisfies Record<LoggerModule, TextStyle>;
+  const logger = createConsola(consolaOptions);
 
-const DELIVERY_TEXT = {
-  failed: styleText('red', '发送失败'),
-  pending: styleText('yellow', '等待发送'),
-  preview: styleText('dim', '仅预览'),
-  sent: styleText('green', '已发送'),
-} as const satisfies Record<DanmakuDelivery, string>;
+  if (!prefix) {
+    return logger;
+  }
 
-let nextId = 0;
+  const formattedPrefix = styleText(prefixColor, `[${prefix}]`);
 
-export function createLogger(roomInfo: RoomUserInfo, options: LoggerOptions = {}) {
-  const state = {
-    sendDanmakuEnabled: options.sendDanmakuEnabled ?? false,
-  };
+  return new Proxy(logger, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
 
-  return {
-    state,
-    mount() {
-      log(
-        'room',
-        `直播间 ${roomInfo.room.room_id} 已连接，弹幕发送：${state.sendDanmakuEnabled ? '开启' : '关闭'}`,
-      );
-    },
-    unmount() {
-      log('room', '正在关闭');
-    },
-    danmaku(event: DanmakuEvent, willSend: boolean) {
-      const entries: LoggerDanmakuEntry[] = [];
-      for (const message of event.messages) {
-        const entry = { id: nextId++, message };
-        entries.push(entry);
-        log(
-          'brain',
-          `${formatRange(event.startTimeMs, event.endTimeMs)} ${DELIVERY_TEXT[willSend ? 'pending' : 'preview']} ${message}`,
-        );
+      if (typeof value !== 'function') {
+        return value;
       }
-      return entries;
-    },
-    danmakuDelivery(entries: readonly LoggerDanmakuEntry[], delivery: DanmakuDelivery) {
-      for (const entry of entries) {
-        log('brain', `${DELIVERY_TEXT[delivery]} ${entry.message}`);
+
+      if (!isLogMethod(property)) {
+        return value.bind(target);
       }
-    },
-    hearing(event: HearingFinalEvent) {
-      log(
-        'hearing',
-        `#${event.index} ${formatRange(event.startTimeMs, event.endTimeMs)} ${event.text}`,
-      );
-    },
-    vision(event: VisionImageEvent) {
-      log(
-        'vision',
-        `${formatRange(event.startTimeMs, event.endTimeMs)} ${event.frames.length} 帧，${formatBytes(event.buffer.byteLength)}`,
-      );
-    },
-    ffmpeg(message: string) {
-      log('ffmpeg', message);
-    },
-    error(module: LoggerModule, error: unknown) {
-      log(module, toErrorMessage(error), 'red');
-    },
-  };
-}
 
-function log(module: LoggerModule, message: string, color: TextStyle = MODULE_COLORS[module]) {
-  console.log(`${styleText(color, `[${module}]`)} ${message}`);
+      return (...args: unknown[]) => {
+        return Reflect.apply(value, target, [formattedPrefix, ...args]);
+      };
+    },
+  });
 }
-
-function formatRange(startTimeMs: number, endTimeMs: number) {
-  return styleText('dim', formatTimeRange(startTimeMs, endTimeMs));
-}
-
-function toErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
-}
-
-export type Logger = ReturnType<typeof createLogger>;

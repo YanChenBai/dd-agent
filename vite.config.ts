@@ -17,6 +17,9 @@ export default defineConfig({
     rules: { 'vite-plus/prefer-vite-plus-imports': 'error' },
     options: { typeAware: true, typeCheck: true },
   },
+  resolve: {
+    tsconfigPaths: true,
+  },
   pack: {
     entry: 'src/index.ts',
     format: ['esm'],
@@ -32,14 +35,14 @@ export default defineConfig({
       },
       dev: {
         cache: false,
-        command: 'node --import @oxc-node/core/register --watch --env-file=.env src/index.ts',
+        command: 'node --import @oxc-node/core/register --watch src/index.ts',
       },
       ready: {
         command: 'vp check && vp test && vp pack',
       },
       start: {
         cache: false,
-        command: 'node --import @oxc-node/core/register --env-file=.env dist/index.mjs',
+        command: 'node --import @oxc-node/core/register dist/index.mjs',
         dependsOn: ['build'],
       },
     },

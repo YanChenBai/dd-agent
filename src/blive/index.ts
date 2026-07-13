@@ -2,36 +2,25 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import type { Readable } from 'node:stream';
 
 import { createNanoEvents } from 'nanoevents';
-import PQueue from 'p-queue';
-import puppeteer from 'puppeteer';
-import { getStream, launch, wss, type PuppeteerStream } from 'puppeteer-stream';
 
-import { env } from '../env.ts';
+import { fetchFlvPlayInfo } from '@/bili-api/index.ts';
+import { createLogger } from '@/logger/index.ts';
+
 import type { BliveEvents } from './types.ts';
+
+export * from './types.ts';
 
 const BROWSER_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
-const LIVE_URL_PREFIX = 'https://live.bilibili.com';
-const BILIBILI_LOGIN_URL = 'https://passport.bilibili.com/login';
-const LIVE_PAGE_SETTLE_MS = 3_000;
-const SEND_INTERVAL_MS = 5_000;
-type BrowserPage = Awaited<ReturnType<Awaited<ReturnType<typeof launch>>['newPage']>>;
 
 export function createBlive(roomId: number) {
-  let browser: Awaited<ReturnType<typeof launch>> | undefined;
-  let livePage: BrowserPage | undefined;
-  let mediaStream: PuppeteerStream | undefined;
+  const logger = createLogger({ prefix: 'ffmpeg', prefixColor: 'yellow' });
   let ffmpeg: ChildProcess | undefined;
   let imageBuffer = Buffer.alloc(0);
   let audioSampleCount = 0;
   let imageIndex = 0;
   const emitter = createNanoEvents<BliveEvents>();
-  const sendQueue = new PQueue({
-    concurrency: 1,
-    interval: SEND_INTERVAL_MS,
-    intervalCap: 1,
-  });
 
   const consumeImageData = (chunk: Buffer) => {
     // pipe 的 data 事件不会按 JPEG 图片边界分块：
@@ -71,62 +60,16 @@ export function createBlive(roomId: number) {
     }
   };
 
-  const startBrowser = async () => {
-    if (ffmpeg || browser || mediaStream) {
+  const startUrl = (flvUrl: string) => {
+    if (ffmpeg) {
       throw new Error('Blive is already running');
     }
 
     imageBuffer = Buffer.alloc(0);
     audioSampleCount = 0;
     imageIndex = 0;
-    browser = await launch(puppeteer, {
-      headless: false,
-      userDataDir: env.BROWSER_USER_DATA_DIR,
-      defaultViewport: {
-        width: 1280,
-        height: 720,
-      },
-      args: [
-        '--disable-features=PreloadMediaEngagementData,MediaEngagementBypassAutoplayPolicies',
-        '--no-sandbox',
-      ],
-      startDelay: 500,
-    });
-
-    const page = await browser.newPage();
-    livePage = page;
-    await page.setUserAgent(BROWSER_USER_AGENT);
-    await ensureBilibiliLogin(page, message => {
-      emitter.emit('stderr', message);
-    });
-    await page.goto(`${LIVE_URL_PREFIX}/${roomId}`, {
-      waitUntil: 'domcontentloaded',
-      timeout: 60_000,
-    });
-    await prepareLivePage(page);
-
-    const stream = await getStream(page, {
-      audio: true,
-      video: true,
-      mimeType: 'video/webm;codecs=vp8,opus',
-      frameSize: 250,
-      videoConstraints: {
-        mandatory: {
-          width: 1280,
-          height: 720,
-          frameRate: 15,
-        },
-      },
-      retry: {
-        each: 100,
-        times: 5,
-      },
-    });
-    mediaStream = stream;
-
-    const process = createFFmpeg();
+    const process = createFFmpeg(roomId, flvUrl);
     ffmpeg = process;
-    stream.pipe(process.stdin!);
 
     process.stdout?.on('data', (chunk: Buffer) => {
       const buffer = Buffer.from(chunk);
@@ -145,10 +88,15 @@ export function createBlive(roomId: number) {
     });
 
     process.stderr?.on('data', (chunk: Buffer) => {
-      emitter.emit('stderr', chunk.toString());
+      const message = chunk.toString().trim();
+      if (message && !message.includes('deprecated pixel format used')) {
+        logger.warn(message);
+        emitter.emit('stderr', message);
+      }
     });
 
     process.on('error', error => {
+      logger.error(error);
       emitter.emit('error', error);
     });
 
@@ -159,189 +107,58 @@ export function createBlive(roomId: number) {
         audioSampleCount = 0;
         imageIndex = 0;
       }
+      logger.info(`已关闭（code=${String(code)}, signal=${String(signal)}）`);
       emitter.emit('close', code, signal);
     });
   };
 
+  function isRunning(): boolean {
+    return ffmpeg !== undefined;
+  }
+
+  function onAudio(callback: BliveEvents['audio']) {
+    return emitter.on('audio', callback);
+  }
+
+  function onImage(callback: BliveEvents['image']) {
+    return emitter.on('image', callback);
+  }
+
+  function onError(callback: BliveEvents['error']) {
+    return emitter.on('error', callback);
+  }
+
+  function onClose(callback: BliveEvents['close']) {
+    return emitter.on('close', callback);
+  }
+
+  function onStderr(callback: BliveEvents['stderr']) {
+    return emitter.on('stderr', callback);
+  }
+
+  async function start(): Promise<void> {
+    startUrl(await fetchFlvPlayInfo(roomId));
+  }
+
+  function stop(signal: NodeJS.Signals = 'SIGTERM'): boolean {
+    return ffmpeg?.kill(signal) ?? false;
+  }
+
   return {
     roomId,
-    get running() {
-      return ffmpeg !== undefined || mediaStream !== undefined || browser !== undefined;
-    },
-    onAudio: (callback: BliveEvents['audio']) => emitter.on('audio', callback),
-    onImage: (callback: BliveEvents['image']) => emitter.on('image', callback),
-    onError: (callback: BliveEvents['error']) => emitter.on('error', callback),
-    onClose: (callback: BliveEvents['close']) => emitter.on('close', callback),
-    onStderr: (callback: BliveEvents['stderr']) => emitter.on('stderr', callback),
-    async start() {
-      await startBrowser();
-    },
-    sendDanmaku(messages: readonly string[]) {
-      return Promise.all(
-        messages.map(message => sendQueue.add(() => sendDanmaku(livePage, message))),
-      );
-    },
-    async stop(signal: NodeJS.Signals = 'SIGTERM') {
-      const didSignalFFmpeg = ffmpeg?.kill(signal) ?? false;
-      const stream = mediaStream;
-      const activeBrowser = browser;
-      mediaStream = undefined;
-      browser = undefined;
-      livePage = undefined;
-      sendQueue.pause();
-      sendQueue.clear();
-
-      await stream?.stop().catch(error => {
-        emitter.emit('error', toError(error));
-      });
-      stream?.destroy();
-      await activeBrowser?.close().catch(error => {
-        emitter.emit('error', toError(error));
-      });
-      await wss
-        .then(server => server.close())
-        .catch(error => {
-          emitter.emit('error', toError(error));
-        });
-
-      return didSignalFFmpeg;
-    },
+    isRunning,
+    onAudio,
+    onImage,
+    onError,
+    onClose,
+    onStderr,
+    start,
+    startUrl,
+    stop,
   };
 }
 
-async function sendDanmaku(page: BrowserPage | undefined, message: string) {
-  if (!page || page.isClosed()) {
-    throw new Error('Cannot send danmaku before the live browser page is ready');
-  }
-
-  await page.bringToFront();
-  const result = await page.evaluate(async message => {
-    try {
-      return await (globalThis as any).livePlayer?.sendDanmaku?.({ msg: message });
-    } catch (error) {
-      return {
-        code: -1,
-        message: error instanceof Error ? error.message : String(error),
-      };
-    }
-  }, message);
-
-  if (result?.code !== 0) {
-    throw new Error(result?.message || result?.msg || 'Failed to send danmaku through livePlayer');
-  }
-}
-
-async function ensureBilibiliLogin(page: BrowserPage, log: (message: string) => void) {
-  await page.goto(LIVE_URL_PREFIX, {
-    waitUntil: 'domcontentloaded',
-    timeout: 60_000,
-  });
-
-  if (await isBilibiliLoggedIn(page)) {
-    log('Bilibili login state detected from browser profile');
-    return;
-  }
-
-  log(`Bilibili login required; opening ${BILIBILI_LOGIN_URL}`);
-  await page.goto(BILIBILI_LOGIN_URL, {
-    waitUntil: 'domcontentloaded',
-    timeout: 60_000,
-  });
-  await waitForBilibiliLogin(page, env.BILIBILI_LOGIN_TIMEOUT_MS);
-  log('Bilibili login completed');
-}
-
-async function waitForBilibiliLogin(page: BrowserPage, timeoutMs: number) {
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < timeoutMs) {
-    if (await isBilibiliLoggedIn(page)) {
-      return;
-    }
-
-    await sleep(1_000);
-  }
-
-  throw new Error(`Timed out waiting for Bilibili login after ${timeoutMs}ms`);
-}
-
-async function isBilibiliLoggedIn(page: BrowserPage) {
-  const cookies = await page.cookies(LIVE_URL_PREFIX, 'https://www.bilibili.com');
-  const names = new Set(cookies.map(cookie => cookie.name));
-
-  if (names.has('SESSDATA') && names.has('DedeUserID')) {
-    return true;
-  }
-
-  return page.evaluate(`
-    Boolean(
-      document.querySelector('.header-entry-avatar')
-        || document.querySelector('[class*="avatar"] img')
-        || document.querySelector('[class*="user"] [class*="name"]')
-    )
-  `);
-}
-
-async function prepareLivePage(page: BrowserPage) {
-  await page.waitForSelector('video', { timeout: 60_000 });
-  await sleep(LIVE_PAGE_SETTLE_MS);
-  await applyLivePageLayout(page);
-  await page.evaluate(`
-    for (const video of document.querySelectorAll('video')) {
-      video.muted = false;
-      video.volume = 1;
-      void video.play();
-    }
-  `);
-  await page.waitForFunction(
-    `[...document.querySelectorAll('video')].some(video => video.readyState >= 2)`,
-    { timeout: 60_000 },
-  );
-}
-
-async function applyLivePageLayout(page: BrowserPage) {
-  await page.evaluate(`
-    document.body.classList.add('player-full-win');
-    document.body.classList.add('hide-aside-area');
-
-    const livePlayer = window.livePlayer;
-    const safeCall = (callback) => {
-      try {
-        callback();
-      } catch {
-        // Ignore unstable livePlayer private API errors; CSS fallbacks below still apply.
-      }
-    };
-
-    if (livePlayer) {
-      safeCall(() => livePlayer.setFullscreenStatus?.(1));
-      safeCall(() => livePlayer.changeCtrlVisible?.(false));
-      safeCall(() => livePlayer.resize?.());
-    }
-
-    const styleId = 'dd-agent-live-page-layout';
-    document.getElementById(styleId)?.remove();
-    const style = document.createElement('style');
-    style.id = styleId;
-    style.textContent = [
-      '#gift-control-vm { display: none !important; }',
-      '#gift-control-panel-vm { display: none !important; }',
-      '.gift-control-section { display: none !important; }',
-      '.gift-panel { display: none !important; }',
-      '.gift-section { display: none !important; }',
-      '.bilibili-live-player-video-danmaku { display: none !important; }',
-      '.web-player-danmaku { display: none !important; }',
-      '.danmaku-screen { display: none !important; }',
-      '.web-player-icon-roomStatus { display: none !important; }',
-      '.web-player-controller-wrap { display: none !important; }',
-      'body.player-full-win .player-section { bottom: 0 !important; }',
-    ].join('\\n');
-    document.head.append(style);
-    window.dispatchEvent(new Event('resize'));
-  `);
-}
-
-function createFFmpeg() {
+function createFFmpeg(roomId: number, flvUrl: string) {
   return spawn(
     'ffmpeg',
     [
@@ -351,7 +168,7 @@ function createFFmpeg() {
       // 日志等级：只输出 warning 及以上日志
       // 可选：error / warning / info / debug
       '-loglevel',
-      'warning',
+      'error',
 
       // 输入参数：降低缓冲，尽量减少直播流延迟
       // 注意：这类低延迟参数可能会牺牲稳定性，部分流上可能更容易卡顿或丢包
@@ -375,9 +192,18 @@ function createFFmpeg() {
       '-probesize',
       '1000000',
 
-      // 输入地址：puppeteer-stream 录制当前浏览器 tab 后写入 stdin 的 WebM。
+      // B 站直播 CDN 会校验请求来源。缺少这些请求头时，即使签名 URL 有效也可能返回 403。
+      // HTTP 输入选项必须位于 -i 之前，才会应用到下面的 FLV 请求。
+      '-user_agent',
+      BROWSER_USER_AGENT,
+      '-referer',
+      `https://live.bilibili.com/${roomId}`,
+      '-headers',
+      'Origin: https://live.bilibili.com\r\n',
+
+      // 输入地址，这里是 FLV 直播流 URL
       '-i',
-      'pipe:0',
+      flvUrl,
 
       // =========================
       // 输出 1：音频 -> stdout
@@ -462,19 +288,11 @@ function createFFmpeg() {
       'pipe:3',
     ],
     {
-      // stdio[0] = stdin：pipe，对应 pipe:0，用来接收浏览器录制的 WebM
+      // stdio[0] = stdin：ignore，不给 FFmpeg 输入命令
       // stdio[1] = stdout：pipe，对应 pipe:1，用来读取 PCM 音频
       // stdio[2] = stderr：pipe，用来读取 FFmpeg 日志
       // stdio[3] = 额外 pipe，对应 pipe:3，用来读取 MJPEG 图片流
-      stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
     },
   );
-}
-
-function toError(error: unknown) {
-  return error instanceof Error ? error : new Error(String(error));
-}
-
-function sleep(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms));
 }

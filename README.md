@@ -7,13 +7,15 @@
 ## 工作方式
 
 ```text
-Bilibili 直播流
+Bilibili FLV 直播流（fetchFlvPlayInfo）
   ├─ 音频 → VAD → SenseVoice 语音识别 ─┐
   └─ 视频 → 定时抽帧 → 2×2 画面拼图 ───┼─ 短期记忆 → 多模态模型 → 弹幕
-                                       └─ 终端仪表盘
+                                       ├─ 终端预览
+                                       └─ 嘴（Puppeteer）→ Bilibili 直播间
 ```
 
-- 使用 FFmpeg 拉取直播流，每 5 秒抽取一帧画面，同时输出 16 kHz 单声道 PCM 音频。
+- 通过 `fetchFlvPlayInfo` 获取 FLV 地址并交给 FFmpeg，每 5 秒抽取一帧画面，同时输出 16 kHz 单声道 PCM 音频。
+- “嘴”模块始终启动 Puppeteer 并复用持久化登录态；是否实际向当前直播间发送弹幕由配置开关控制。
 - 使用 sherpa-onnx、SenseVoice 和 Silero VAD（或 TEN VAD）在本地识别主播语音。
 - 每 20 秒组合最近四帧，并与近期字幕一起交给 OpenAI 兼容的多模态模型。
 - 默认仅在终端预览生成结果；启用发送后，每 20 秒最多发送一条，以避免刷屏。
@@ -45,52 +47,41 @@ Bilibili 直播流
 
    也可以在环境变量中通过 `SENSEVOICE_MODEL`、`TOKENS` 和 `VAD_MODEL` 指向其他位置。
 
-3. 从示例创建本地配置：
+3. 编辑根目录的 [`dd.config.ts`](dd.config.ts)。它使用项目导出的 `defineConfig`，至少需要替换 `ai.apiKey`，并按需要设置 `live.roomId`。
+
+4. 启动单直播间 Agent：
 
    ```powershell
-   Copy-Item .env.example .env
+   vpr start -- single
    ```
 
-   至少需要填写：
+   `vpr start -- single` 会先生成面向 Node.js 的生产构建，再运行 CLI，不会启用热更新。开发时可使用 `vpr dev -- single` 启动带热更新的 Vite 开发模式。
 
-   | 变量           | 说明                                        |
-   | -------------- | ------------------------------------------- |
-   | `LIVE_ROOM_ID` | Bilibili 直播间号，运行时直播间必须正在开播 |
-   | `AI_MODEL`     | OpenAI 兼容服务提供的模型 ID                |
-   | `AI_API_KEY`   | 模型服务 API Key                            |
-   | `AI_BASE_URL`  | OpenAI 兼容 API 地址                        |
+   按 `Ctrl+C` 安全退出。浏览器会打开当前直播间，首次运行需完成 Bilibili 登录。默认 `live.sendDanmaku=false`，仅预览生成的弹幕；将其改为 `true` 后才会实际发送。
 
-4. 启动 Agent：
+5. 启动 Explore Agent：
 
    ```powershell
-   vpr start
+   vpr start -- explore
    ```
 
-   `vpr start` 会先生成面向 Node.js 的生产构建，再运行 `dist/index.js`，不会启用热更新。开发时可使用 `vpr dev` 启动带热更新的 Vite 开发模式。
-
-   按 `Ctrl+C` 安全退出。默认 `SEND_DANMAKU=0`，只预览生成的弹幕；确认浏览器登录态可用后，将其改为 `1` 才会真正发送。
+   Explore Agent 会打开 `explore.areaUrl` 指向的 Bilibili 直播分区页，逐页读取直播间列表，然后让 AI 根据兴趣程度选择进入哪个房间以及观察多久。进入房间后复用单直播间模式的听觉、视觉和弹幕逻辑；`explore.maxRunMs` 控制总运行时长，`explore.observeRoomMs` 控制单房间最长观察时间（代码硬上限为 1 小时）。
 
 ## 常用配置
 
-完整配置及注释见 [`.env.example`](.env.example)。常用选项包括：
+完整配置及注释见 [`dd.config.ts`](dd.config.ts)。常用 CLI 命令：
 
-| 变量                      | 默认值   | 说明                               |
-| ------------------------- | -------- | ---------------------------------- |
-| `AGENT_NAME`              | `DD`     | 主播称呼 Agent 时使用的名字        |
-| `AGENT_STOP_AFTER_MS`     | `0`      | 自动停止时间；`0` 表示持续运行     |
-| `SEND_DANMAKU`            | `0`      | `1` 为发送弹幕，`0` 为仅预览       |
-| `BROWSER_USER_DATA_DIR`   | 空       | Bilibili 登录态使用的浏览器目录    |
-| `LIVE_STREAMER_ALIASES`   | 空       | 主播别名，多个值使用英文逗号分隔   |
-| `MEMORY_RETENTION_MS`     | `600000` | 语音和视觉记录的保留时长           |
-| `BRAIN_CONTEXT_WINDOW_MS` | `120000` | 每次请求模型时使用的近期上下文长度 |
-| `VAD_KIND`                | `silero` | VAD 实现，可选 `silero` 或 `ten`   |
-| `PROVIDER`                | `cpu`    | sherpa-onnx 执行提供程序           |
+| 命令                  | 说明                                           |
+| --------------------- | ---------------------------------------------- |
+| `dd single [room-id]` | 运行单个直播间；省略 ID 时使用 `live.roomId`。 |
+| `dd explore`          | 运行 ExploreAgent 到处 D 模式。                |
+| `--send-danmaku`      | 覆盖配置，在本次运行中实际发送弹幕。           |
 
 ## 未来开发方向
 
 - **说话人区分与主播声纹识别**：接入 sherpa-onnx Speaker Diarization，将字幕按说话人分段；支持预先注册主播声纹，通过 Speaker Identification 标记主播、嘉宾及其他音源，减少错误归因。
 - **自定义唤醒词**：接入 sherpa-onnx Keyword Spotting，支持类似“小爱同学”的本地唤醒词；结合主播声纹校验，只在主播说出唤醒词时触发 Agent，降低直播音轨中的误唤醒。
-- **LoopAgent**：将当前单次弹幕生成扩展为可持续决策的 Agent 循环，引入工具调用、短期与长期记忆、事件判断和行动规划，使 Agent 能根据直播上下文决定何时观察、回应、等待或执行其他操作。
+- **Explore Agent**：将当前单次弹幕生成扩展为可持续决策的 Agent 循环，引入工具调用、短期与长期记忆、事件判断和行动规划，使 Agent 能根据直播上下文决定何时观察、回应、等待或执行其他操作。
 
 ## 开发
 
@@ -100,13 +91,13 @@ Bilibili 直播流
 vp check          # 格式化检查、Lint 和类型检查
 vp test           # 运行测试
 vpr build # 构建 Agent
-vpr start # 构建并运行 Agent，不启用热更新
-vpr dev   # 以开发模式运行 Agent，启用热更新
+vpr start -- single  # 构建并运行单直播间 Agent，不启用热更新
+vpr dev -- explore   # 以开发模式运行 ExploreAgent，启用热更新
 vpr ready # 依次执行检查、测试和构建
 ```
 
 ## 安全提示
 
-- 不要提交 `.env`、API Key、Cookie 或浏览器用户数据目录。
-- 首次使用请保持 `SEND_DANMAKU=0`，检查生成质量和频率后再开启发送。
+- 不要提交含有真实 API Key 的配置文件、Cookie 或浏览器用户数据目录。
+- 首次使用请保持 `live.sendDanmaku=false`，检查生成质量和频率后再开启发送。
 - 使用自动弹幕前，请自行确认符合平台规则及直播间规范。

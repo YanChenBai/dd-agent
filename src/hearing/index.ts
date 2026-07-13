@@ -1,7 +1,9 @@
 import { createNanoEvents } from 'nanoevents';
 
-import type { Blive } from '../blive/types.ts';
-import { env } from '../env.ts';
+import type { Blive } from '@/blive/types.ts';
+import type { DDConfig } from '@/config/index.ts';
+import { createLogger } from '@/logger/index.ts';
+
 import {
   createCircularBuffer,
   createLinearResampler,
@@ -13,16 +15,19 @@ import {
 } from './sherpa-onnx.ts';
 import type { HearingEvents, HearingFinalEvent } from './types.ts';
 
-const BLIVE_SAMPLE_RATE = 16_000;
+export * from './types.ts';
 
-export function startHearing(blive: Pick<Blive, 'onAudio'>) {
+const BLIVE_SAMPLE_RATE = 16_000;
+const logger = createLogger({ prefix: 'hearing', prefixColor: 'cyan' });
+
+export function startHearing(blive: Pick<Blive, 'onAudio'>, config: DDConfig) {
   const emitter = createNanoEvents<HearingEvents>();
-  const recognizer = createOfflineRecognizer(createRecognizerConfig());
-  const vad = createVoiceActivityDetector(createVadConfig(), env.MAX_PENDING_SECONDS);
+  const recognizer = createOfflineRecognizer(createRecognizerConfig(config));
+  const vad = createVoiceActivityDetector(createVadConfig(config), config.asr.maxPendingSeconds);
   const vadWindowSize = Number(
     vad.config.tenVad?.windowSize ?? vad.config.sileroVad?.windowSize ?? 256,
   );
-  const vadBuffer = createCircularBuffer(env.MAX_PENDING_SECONDS * env.SAMPLE_RATE);
+  const vadBuffer = createCircularBuffer(config.asr.maxPendingSeconds * config.asr.sampleRate);
 
   let resampler: LinearResampler | undefined;
   let currentInputSampleRate = 0;
@@ -56,17 +61,23 @@ export function startHearing(blive: Pick<Blive, 'onAudio'>) {
     }
   });
 
-  return {
-    onFinal: (callback: HearingEvents['final']) => emitter.on('final', callback),
-    async stop() {
-      if (stopped) {
-        return;
-      }
+  function onFinal(callback: HearingEvents['final']) {
+    return emitter.on('final', callback);
+  }
 
-      stopped = true;
-      unsubscribeAudio();
-      vad.flush();
-    },
+  async function stop(): Promise<void> {
+    if (stopped) {
+      return;
+    }
+
+    stopped = true;
+    unsubscribeAudio();
+    vad.flush();
+  }
+
+  return {
+    onFinal,
+    stop,
   };
 
   function printFinal(start: number, samples: Float32Array) {
@@ -77,7 +88,7 @@ export function startHearing(blive: Pick<Blive, 'onAudio'>) {
     const stream = recognizer.createStream();
     stream.acceptWaveform({
       samples,
-      sampleRate: env.SAMPLE_RATE,
+      sampleRate: config.asr.sampleRate,
     });
 
     recognizer.decode(stream);
@@ -85,8 +96,8 @@ export function startHearing(blive: Pick<Blive, 'onAudio'>) {
     const text = result.text?.trim();
 
     if (text) {
-      const mediaStartMs = (start / env.SAMPLE_RATE) * 1_000;
-      const mediaEndMs = mediaStartMs + (samples.length / env.SAMPLE_RATE) * 1_000;
+      const mediaStartMs = (start / config.asr.sampleRate) * 1_000;
+      const mediaEndMs = mediaStartMs + (samples.length / config.asr.sampleRate) * 1_000;
       const epochMs = mediaEpochMs ?? Date.now() - mediaEndMs;
 
       emitter.emit('final', {
@@ -97,16 +108,17 @@ export function startHearing(blive: Pick<Blive, 'onAudio'>) {
         mediaStartMs,
         mediaEndMs,
       } satisfies HearingFinalEvent);
+      logger.info(`#${segmentIndex} ${text}`);
     }
   }
 
   function resampleIfNeeded(samples: Float32Array, inputSampleRate: number) {
-    if (inputSampleRate === env.SAMPLE_RATE) {
+    if (inputSampleRate === config.asr.sampleRate) {
       return samples;
     }
 
     if (!resampler || currentInputSampleRate !== inputSampleRate) {
-      resampler = createLinearResampler(inputSampleRate, env.SAMPLE_RATE);
+      resampler = createLinearResampler(inputSampleRate, config.asr.sampleRate);
       currentInputSampleRate = inputSampleRate;
     }
 
@@ -124,41 +136,41 @@ function pcmS16leToFloat32(buffer: Buffer) {
   return samples;
 }
 
-function createRecognizerConfig(): SenseVoiceRecognizerConfig {
+function createRecognizerConfig(config: DDConfig): SenseVoiceRecognizerConfig {
   return {
     featConfig: {
-      sampleRate: env.SAMPLE_RATE,
-      featureDim: env.FEATURE_DIM,
+      sampleRate: config.asr.sampleRate,
+      featureDim: config.asr.featureDim,
     },
     modelConfig: {
       senseVoice: {
-        model: env.SENSEVOICE_MODEL,
-        useInverseTextNormalization: env.USE_ITN,
+        model: config.asr.senseVoiceModel,
+        useInverseTextNormalization: Number(config.asr.useItn),
       },
-      tokens: env.TOKENS,
-      numThreads: env.NUM_THREADS,
-      provider: env.PROVIDER,
-      debug: env.DEBUG,
+      tokens: config.asr.tokens,
+      numThreads: config.asr.numThreads,
+      provider: config.asr.provider,
+      debug: Number(config.asr.debug),
     },
   };
 }
 
-function createVadConfig(): VadConfig {
+function createVadConfig(config: DDConfig): VadConfig {
   const common = {
-    sampleRate: env.SAMPLE_RATE,
-    numThreads: env.VAD_NUM_THREADS,
-    provider: env.PROVIDER,
-    debug: env.DEBUG,
+    sampleRate: config.asr.sampleRate,
+    numThreads: config.asr.vadNumThreads,
+    provider: config.asr.provider,
+    debug: Number(config.asr.debug),
   };
 
-  if (env.VAD_KIND === 'silero') {
+  if (config.asr.vad.kind === 'silero') {
     return {
       sileroVad: {
-        model: env.VAD_MODEL,
-        threshold: env.VAD_THRESHOLD,
-        minSpeechDuration: env.VAD_MIN_SPEECH,
-        minSilenceDuration: env.VAD_MIN_SILENCE,
-        windowSize: env.VAD_WINDOW_SIZE,
+        model: config.asr.vad.model,
+        threshold: config.asr.vad.threshold,
+        minSpeechDuration: config.asr.vad.minSpeechSeconds,
+        minSilenceDuration: config.asr.vad.minSilenceSeconds,
+        windowSize: config.asr.vad.windowSize,
       },
       ...common,
     };
@@ -166,11 +178,11 @@ function createVadConfig(): VadConfig {
 
   return {
     tenVad: {
-      model: env.VAD_MODEL,
-      threshold: env.VAD_THRESHOLD,
-      minSpeechDuration: env.VAD_MIN_SPEECH,
-      minSilenceDuration: env.VAD_MIN_SILENCE,
-      windowSize: env.VAD_WINDOW_SIZE,
+      model: config.asr.vad.model,
+      threshold: config.asr.vad.threshold,
+      minSpeechDuration: config.asr.vad.minSpeechSeconds,
+      minSilenceDuration: config.asr.vad.minSilenceSeconds,
+      windowSize: config.asr.vad.windowSize,
     },
     ...common,
   };

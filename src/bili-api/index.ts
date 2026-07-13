@@ -9,6 +9,8 @@ import type {
   RoomUserInfo,
 } from './types.ts';
 
+export * from './types.ts';
+
 const api = ky.create({
   prefix: 'https://api.live.bilibili.com',
   headers: {

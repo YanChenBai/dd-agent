@@ -14,8 +14,9 @@ dist-ssr
 .env
 .env.*
 !.env.example
+dd.config.local.ts
 models/
-.browser-user-data/
+.browser-user-data*/
 
 # Editor directories and files
 .vscode/*
@@ -34,3 +35,6 @@ models/
 !.vscode/
 !.vscode/settings.json
 !.vscode/extensions.json
+dd.config.ts
+
+.dd-memory

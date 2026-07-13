@@ -11,7 +11,7 @@ export type MemoryRecord =
       type: 'vision';
       startTimeMs: number;
       endTimeMs: number;
-      buffer: Buffer;
+      filePath: string;
     };
 
 export interface TimeRange {
