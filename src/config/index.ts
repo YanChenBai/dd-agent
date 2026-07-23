@@ -29,6 +29,7 @@ export function createDefaultConfig(appDir = process.cwd()): DDConfig {
       stopAfterMs: 0,
       danmakuIntervalMs: 30_000,
       danmakuHistoryTurns: 12,
+      shutdownTimeoutMs: 15_000,
     },
     live: {
       roomId: 82_568,
@@ -36,6 +37,14 @@ export function createDefaultConfig(appDir = process.cwd()): DDConfig {
       streamerAliases: [],
       browserUserDataDir: resolve(rootDir, '.browser-user-data'),
       loginTimeoutMs: 5 * 60 * 1_000,
+      statusPollIntervalMs: 30_000,
+      mediaStallTimeoutMs: 45_000,
+      apiRequestTimeoutMs: 10_000,
+      apiRetryLimit: 2,
+      apiRetryBackoffMs: 300,
+      ffmpegMaxRestarts: 2,
+      ffmpegRestartBackoffMs: 1_000,
+      ffmpegStopTimeoutMs: 5_000,
     },
     ai: {
       model: 'google/gemma-4-26b-a4b-it:free',

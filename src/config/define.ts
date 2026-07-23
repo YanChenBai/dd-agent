@@ -12,6 +12,8 @@ export interface DDConfig {
     danmakuIntervalMs: number;
     /** 模型请求携带的最近生成对话轮数。 */
     danmakuHistoryTurns: number;
+    /** 所有组件并行关闭时允许等待的最长时间（毫秒）。 */
+    shutdownTimeoutMs: number;
   };
   /** Bilibili 直播间与弹幕发送设置。 */
   live: {
@@ -25,6 +27,22 @@ export interface DDConfig {
     browserUserDataDir: string;
     /** 等待手动完成 Bilibili 登录的最长时间（毫秒）。 */
     loginTimeoutMs: number;
+    /** 检查直播是否仍在进行的周期（毫秒）。 */
+    statusPollIntervalMs: number;
+    /** 未收到任何媒体数据时判定流已卡住的阈值（毫秒）。 */
+    mediaStallTimeoutMs: number;
+    /** 单次 Bilibili API 请求尝试的超时时间（毫秒）。 */
+    apiRequestTimeoutMs: number;
+    /** Bilibili API 网络错误、超时或可恢复状态码的重试次数。 */
+    apiRetryLimit: number;
+    /** Bilibili API 指数退避的基础等待时间（毫秒）。 */
+    apiRetryBackoffMs: number;
+    /** 直播仍在线但 FFmpeg 断流时允许的最大重启次数。 */
+    ffmpegMaxRestarts: number;
+    /** FFmpeg 重启的指数退避基础等待时间（毫秒）。 */
+    ffmpegRestartBackoffMs: number;
+    /** 等待 FFmpeg 响应关闭信号的最长时间（毫秒）。 */
+    ffmpegStopTimeoutMs: number;
   };
   /** OpenAI 兼容模型服务设置。 */
   ai: {
@@ -123,6 +141,7 @@ export const ddConfigSchema = z
       stopAfterMs: nonNegativeInteger,
       danmakuIntervalMs: positiveInteger,
       danmakuHistoryTurns: nonNegativeInteger,
+      shutdownTimeoutMs: positiveInteger,
     }),
     live: z.object({
       roomId: positiveInteger,
@@ -130,6 +149,14 @@ export const ddConfigSchema = z
       streamerAliases: z.array(z.string().trim().min(1)),
       browserUserDataDir: z.string().trim().min(1),
       loginTimeoutMs: positiveInteger,
+      statusPollIntervalMs: positiveInteger,
+      mediaStallTimeoutMs: positiveInteger,
+      apiRequestTimeoutMs: positiveInteger,
+      apiRetryLimit: nonNegativeInteger,
+      apiRetryBackoffMs: positiveInteger,
+      ffmpegMaxRestarts: nonNegativeInteger,
+      ffmpegRestartBackoffMs: positiveInteger,
+      ffmpegStopTimeoutMs: positiveInteger,
     }),
     ai: z.object({
       model: z.string().trim().min(1),

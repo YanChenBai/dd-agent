@@ -53,7 +53,7 @@ describe('createBlive', () => {
     await blive.start();
 
     expect(mocks.fetchFlvPlayInfo).toHaveBeenCalledOnce();
-    expect(mocks.fetchFlvPlayInfo).toHaveBeenCalledWith(ROOM_ID);
+    expect(mocks.fetchFlvPlayInfo).toHaveBeenCalledWith(ROOM_ID, {});
     expect(mocks.spawn).toHaveBeenCalledOnce();
 
     const [command, args] = getSpawnCall();
@@ -119,6 +119,34 @@ describe('createBlive', () => {
       mediaStartMs: 100,
       mediaEndMs: 150,
     });
+    expect(blive.getHealth()).toEqual({
+      startedAtMs: 123_456,
+      lastAudioAtMs: 123_456,
+      lastImageAtMs: undefined,
+      lastMediaAtMs: 123_456,
+      audioBytes: 4_800,
+      audioChunks: 2,
+      imageFrames: 0,
+      flvRefreshes: 1,
+      processStarts: 1,
+      lastStartDurationMs: expect.any(Number),
+      lastRunDurationMs: undefined,
+      lastExitCode: undefined,
+      lastExitSignal: undefined,
+      sigtermTimeouts: 0,
+      sigkillCount: 0,
+    });
+  });
+
+  it('redacts signed stream URLs from FFmpeg diagnostics', async () => {
+    const blive = createBlive(ROOM_ID);
+    const onStderr = vi.fn();
+    blive.onStderr(onStderr);
+    await blive.start();
+
+    ffmpeg.stderr.emit('data', Buffer.from(`Failed to open ${FLV_URL}`));
+
+    expect(onStderr).toHaveBeenCalledWith('Failed to open [REDACTED_URL]');
   });
 });
 

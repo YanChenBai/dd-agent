@@ -10,8 +10,18 @@ describe('DD config', () => {
     const root = resolve('test-project-root');
     const config = createDefaultConfig(root);
 
+    expect(config.agent.shutdownTimeoutMs).toBe(15_000);
     expect(config.live.browserUserDataDir).toBe(resolve(root, '.browser-user-data'));
+    expect(config.live.statusPollIntervalMs).toBe(30_000);
+    expect(config.live.mediaStallTimeoutMs).toBe(45_000);
+    expect(config.live.apiRequestTimeoutMs).toBe(10_000);
+    expect(config.live.apiRetryLimit).toBe(2);
+    expect(config.live.apiRetryBackoffMs).toBe(300);
+    expect(config.live.ffmpegMaxRestarts).toBe(2);
+    expect(config.live.ffmpegRestartBackoffMs).toBe(1_000);
+    expect(config.live.ffmpegStopTimeoutMs).toBe(5_000);
     expect(config.memory.visionDir).toBe(resolve(root, '.dd-memory', 'vision'));
+
     expect(config.asr.senseVoiceModel).toBe(
       resolve(
         root,

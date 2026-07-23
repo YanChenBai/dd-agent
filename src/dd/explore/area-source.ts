@@ -13,36 +13,40 @@ const MAX_STAGNANT_SCROLLS = 3;
 export function createLiveAreaSource(areaUrl: string, config: DDConfig) {
   let browser: Browser | undefined;
   let page: Page | undefined;
+  let closePromise: Promise<void> | undefined;
   let batchNumber = 1;
   const seenRoomIds = new Set<number>();
 
   async function refresh(limit: number): Promise<LiveAreaBatch> {
     batchNumber = 1;
     seenRoomIds.clear();
-    const activePage = await getPage();
-    await activePage.goto(withoutPageParameter(areaUrl), {
-      waitUntil: 'networkidle2',
-      timeout: 60_000,
-    });
-    await activePage.bringToFront();
-    await activePage.evaluate(() => window.scrollTo(0, 0));
-    return collectBatch(activePage, limit);
+    return collectAreaBatch(limit);
   }
 
   async function loadMore(limit: number): Promise<LiveAreaBatch> {
     batchNumber += 1;
-    const activePage = await getPage();
-    await activePage.bringToFront();
-    await scrollPage(activePage);
-    await sleep(1_000);
-    return collectBatch(activePage, limit);
+    return collectAreaBatch(limit);
   }
 
-  async function close(): Promise<void> {
+  function close(): Promise<void> {
+    if (closePromise) {
+      return closePromise;
+    }
+
     const activeBrowser = browser;
     browser = undefined;
     page = undefined;
-    await activeBrowser?.close();
+    if (!activeBrowser) {
+      return Promise.resolve();
+    }
+
+    const operation = activeBrowser.close().finally(() => {
+      if (closePromise === operation) {
+        closePromise = undefined;
+      }
+    });
+    closePromise = operation;
+    return operation;
   }
 
   return {
@@ -81,15 +85,33 @@ export function createLiveAreaSource(areaUrl: string, config: DDConfig) {
     }
     return { batch: batchNumber, candidates };
   }
+
+  async function collectAreaBatch(limit: number): Promise<LiveAreaBatch> {
+    const activePage = await getPage();
+    try {
+      await activePage.goto(withoutPageParameter(areaUrl), {
+        waitUntil: 'domcontentloaded',
+        timeout: 60_000,
+      });
+      await activePage.bringToFront();
+      await activePage.evaluate(() => window.scrollTo(0, 0));
+      await sleep(1_000);
+      return await collectBatch(activePage, limit);
+    } finally {
+      await close();
+    }
+  }
 }
 
 async function collectCandidates(page: Page, limit: number, excludedRoomIds: ReadonlySet<number>) {
   const candidates = new Map<number, LiveRoomCandidate>();
+  const observedRoomIds = new Set<number>();
   let stagnantScrolls = 0;
 
   for (let attempt = 0; attempt < MAX_SCROLL_ATTEMPTS; attempt += 1) {
-    const previousSize = candidates.size;
+    const previousObservedSize = observedRoomIds.size;
     for (const candidate of await extractCandidates(page)) {
+      observedRoomIds.add(candidate.roomId);
       if (!excludedRoomIds.has(candidate.roomId)) {
         candidates.set(candidate.roomId, candidate);
       }
@@ -99,7 +121,7 @@ async function collectCandidates(page: Page, limit: number, excludedRoomIds: Rea
       break;
     }
 
-    stagnantScrolls = candidates.size === previousSize ? stagnantScrolls + 1 : 0;
+    stagnantScrolls = observedRoomIds.size === previousObservedSize ? stagnantScrolls + 1 : 0;
     if (stagnantScrolls >= MAX_STAGNANT_SCROLLS) {
       break;
     }
@@ -165,9 +187,9 @@ async function extractCandidates(page: Page) {
 
 async function scrollPage(page: Page) {
   await page.evaluate(() => {
-    window.scrollBy({
-      top: Math.max(window.innerHeight * 0.8, 600),
-      behavior: 'smooth',
+    window.scrollTo({
+      top: document.scrollingElement?.scrollHeight ?? document.documentElement.scrollHeight,
+      behavior: 'auto',
     });
   });
 }

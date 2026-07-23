@@ -11,6 +11,13 @@ export function formatTimeRange(startTimeMs: number, endTimeMs: number) {
   return `${formatTime(startTimeMs)} - ${formatTime(endTimeMs)}`;
 }
 
+export function formatDurationMs(durationMs: number) {
+  if (durationMs < 1_000) {
+    return `${Math.round(durationMs)}ms`;
+  }
+  return `${(durationMs / 1_000).toFixed(1)}s`;
+}
+
 export function formatBytes(bytes: number) {
   if (bytes < 1024) {
     return `${bytes} B`;

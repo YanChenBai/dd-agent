@@ -4,6 +4,7 @@ import sharp from 'sharp';
 import type { Blive } from '@/blive/types.ts';
 import { formatBytes } from '@/logger/format.ts';
 import { createLogger } from '@/logger/index.ts';
+import { withComponent } from '@/observability/context.ts';
 
 import type { VisionEvents, VisionFrame, VisionOptions } from './types.ts';
 
@@ -12,11 +13,14 @@ export * from './types.ts';
 const FRAME_COUNT = 4;
 const DEFAULT_INTERVAL_MS = 20_000;
 const BACKGROUND = { r: 0, g: 0, b: 0 } as const;
-const logger = createLogger({ prefix: 'vision', prefixColor: 'magenta' });
-
 /** Keeps the four most recent live frames and periodically emits a 2x2 JPEG contact sheet. */
 export function startVision(blive: Blive, options: VisionOptions = {}) {
   const intervalMs = options.intervalMs ?? DEFAULT_INTERVAL_MS;
+  const logger = createLogger({
+    prefix: 'vision',
+    prefixColor: 'magenta',
+    context: options.context ? withComponent(options.context, 'vision') : undefined,
+  });
 
   if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
     throw new RangeError('Vision intervalMs must be greater than 0');

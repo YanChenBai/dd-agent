@@ -17,6 +17,7 @@ const singleCommand = command(
   async argv => {
     await withProcessSignals(async signal => {
       const config = await loadDDConfig();
+
       const { createDD } = await import('./dd/index.ts');
       const roomId = argv._.roomId ? Number(argv._.roomId) : config.live.roomId;
       const dd = await createDD(roomId, {

@@ -15,6 +15,14 @@ export interface HandStatusEvent {
   message: string;
 }
 
+export interface HandStats {
+  queuedMessages: number;
+  activeMessages: number;
+  attemptedMessages: number;
+  sentMessages: number;
+  failedMessages: number;
+}
+
 export interface HandEvents {
   status: (event: HandStatusEvent) => void;
   error: (error: Error) => void;

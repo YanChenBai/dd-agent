@@ -1,13 +1,29 @@
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { hasToolCall, stepCountIs, ToolLoopAgent } from 'ai';
-import type { ConsolaInstance } from 'consola';
+import { Output, stepCountIs, ToolLoopAgent } from 'ai';
+import { z } from 'zod';
 
 import type { DDConfig } from '../../config/index.ts';
-import { formatDuration } from './duration.ts';
 import { createExploreInstructions } from './prompt.ts';
-import type { ExploreTools } from './tools.ts';
 
-export function createExploreAgent(config: DDConfig, tools: ExploreTools, logger: ConsolaInstance) {
+const exploreDecisionOutput = Output.object({
+  schema: z
+    .object({
+      continue: z.boolean(),
+      roomId: z.number().int().positive().nullable(),
+      reason: z.string().trim().min(1).max(200),
+    })
+    .superRefine((decision, context) => {
+      if (decision.continue && decision.roomId !== null) {
+        context.addIssue({
+          code: 'custom',
+          path: ['roomId'],
+          message: 'roomId must be null when continue is true',
+        });
+      }
+    }),
+});
+
+export function createExploreAgent(config: DDConfig) {
   const provider = createOpenAICompatible({
     name: 'openai-compatible',
     apiKey: config.ai.apiKey,
@@ -18,36 +34,8 @@ export function createExploreAgent(config: DDConfig, tools: ExploreTools, logger
   return new ToolLoopAgent({
     model: provider.chatModel(config.ai.model),
     instructions: createExploreInstructions(config.agent.name),
-    tools,
-    stopWhen: [hasToolCall('finish'), stepCountIs(20)],
+    output: exploreDecisionOutput,
+    stopWhen: stepCountIs(1),
     temperature: 0.7,
-    onToolExecutionStart: ({ toolCall }) => {
-      logger.info(`调用工具 ${toolCall.toolName}：${stringify(toolCall.input)}`);
-    },
-    onToolExecutionEnd: ({ toolCall, toolExecutionMs, toolOutput }) => {
-      if (toolOutput.type === 'tool-error') {
-        logger.error(
-          `工具 ${toolCall.toolName} 执行失败（${formatDuration(toolExecutionMs)}）`,
-          toolOutput.error,
-        );
-        return;
-      }
-      logger.info(`工具 ${toolCall.toolName} 执行完成（${formatDuration(toolExecutionMs)}）`);
-    },
-    onStepEnd: ({ dynamicToolCalls }) => {
-      for (const toolCall of dynamicToolCalls) {
-        if (toolCall.invalid) {
-          logger.error(`工具 ${toolCall.toolName} 参数无效`, toolCall.error);
-        }
-      }
-    },
   });
-}
-
-function stringify(value: unknown) {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
 }

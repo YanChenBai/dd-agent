@@ -1,5 +1,7 @@
 import type { RoomUserInfo } from '../../bili-api/types.ts';
 import type { BrainDecision } from '../../brain/types.ts';
+import type { RunContext } from '../../observability/context.ts';
+import type { DDStopReason } from '../types.ts';
 
 export interface LiveRoomCandidate {
   roomId: number;
@@ -7,6 +9,7 @@ export interface LiveRoomCandidate {
   anchor: string;
   area?: string;
   watched?: number;
+  unavailable?: boolean;
 }
 
 export interface LiveAreaBatch {
@@ -14,11 +17,20 @@ export interface LiveAreaBatch {
   candidates: LiveRoomCandidate[];
 }
 
+export interface ExploreDecision {
+  continue: boolean;
+  roomId: number | null;
+  reason: string;
+}
+
+export type WatchedRoomEndReason = DDStopReason | 'checkpoint' | 'brain-switch';
+
 export interface WatchedRoomSummary {
   roomInfo: RoomUserInfo;
   watchedMs: number;
   startedAt: number;
   endedAt: number;
+  endReason: WatchedRoomEndReason;
   canContinue?: boolean;
   context?: RoomContext;
   decision?: BrainDecision;
@@ -36,4 +48,5 @@ export interface ExploreOptions {
   candidateLimit?: number;
   sendDanmakuEnabled?: boolean;
   signal?: AbortSignal;
+  runContext?: RunContext;
 }

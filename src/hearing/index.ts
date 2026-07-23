@@ -1,8 +1,11 @@
+import { performance } from 'node:perf_hooks';
+
 import { createNanoEvents } from 'nanoevents';
 
 import type { Blive } from '@/blive/types.ts';
 import type { DDConfig } from '@/config/index.ts';
 import { createLogger } from '@/logger/index.ts';
+import { withComponent, type RoomContext } from '@/observability/context.ts';
 
 import {
   createCircularBuffer,
@@ -13,14 +16,27 @@ import {
   type SenseVoiceRecognizerConfig,
   type VadConfig,
 } from './sherpa-onnx.ts';
-import type { HearingEvents, HearingFinalEvent } from './types.ts';
+import type { HearingEvents, HearingFinalEvent, HearingStats } from './types.ts';
 
 export * from './types.ts';
 
 const BLIVE_SAMPLE_RATE = 16_000;
-const logger = createLogger({ prefix: 'hearing', prefixColor: 'cyan' });
+interface PendingSegment {
+  index: number;
+  start: number;
+  samples: Float32Array;
+}
 
-export function startHearing(blive: Pick<Blive, 'onAudio'>, config: DDConfig) {
+export function startHearing(
+  blive: Pick<Blive, 'onAudio'>,
+  config: DDConfig,
+  context?: RoomContext,
+) {
+  const logger = createLogger({
+    prefix: 'hearing',
+    prefixColor: 'cyan',
+    context: context ? withComponent(context, 'hearing') : undefined,
+  });
   const emitter = createNanoEvents<HearingEvents>();
   const recognizer = createOfflineRecognizer(createRecognizerConfig(config));
   const vad = createVoiceActivityDetector(createVadConfig(config), config.asr.maxPendingSeconds);
@@ -28,12 +44,22 @@ export function startHearing(blive: Pick<Blive, 'onAudio'>, config: DDConfig) {
     vad.config.tenVad?.windowSize ?? vad.config.sileroVad?.windowSize ?? 256,
   );
   const vadBuffer = createCircularBuffer(config.asr.maxPendingSeconds * config.asr.sampleRate);
+  const maxQueuedSamples = config.asr.maxPendingSeconds * config.asr.sampleRate;
+  const pendingSegments: PendingSegment[] = [];
 
   let resampler: LinearResampler | undefined;
   let currentInputSampleRate = 0;
   let segmentIndex = 0;
   let mediaEpochMs: number | undefined;
-  let recognitionQueue = Promise.resolve();
+  let recognitionWorker: Promise<void> | undefined;
+  let queuedSamples = 0;
+  let activeSamples = 0;
+  let decodedSegments = 0;
+  let emptySegments = 0;
+  let droppedSegments = 0;
+  let failedSegments = 0;
+  let lastDecodeMs: number | undefined;
+  let lastRealTimeFactor: number | undefined;
   let stopped = false;
 
   const unsubscribeAudio = blive.onAudio((buffer, timing) => {
@@ -55,7 +81,7 @@ export function startHearing(blive: Pick<Blive, 'onAudio'>, config: DDConfig) {
         vad.acceptWaveform(window);
       }
 
-      drainSegments();
+      drainVadSegments();
     } catch (error) {
       reportError(error);
     }
@@ -69,6 +95,20 @@ export function startHearing(blive: Pick<Blive, 'onAudio'>, config: DDConfig) {
     return emitter.on('error', callback);
   }
 
+  function getStats(): HearingStats {
+    return {
+      queuedSegments: pendingSegments.length,
+      queuedAudioSeconds: queuedSamples / config.asr.sampleRate,
+      activeAudioSeconds: activeSamples / config.asr.sampleRate,
+      decodedSegments,
+      emptySegments,
+      droppedSegments,
+      failedSegments,
+      lastDecodeMs,
+      lastRealTimeFactor,
+    };
+  }
+
   async function stop(): Promise<void> {
     if (stopped) {
       return;
@@ -77,63 +117,126 @@ export function startHearing(blive: Pick<Blive, 'onAudio'>, config: DDConfig) {
     stopped = true;
     unsubscribeAudio();
     vad.flush();
-    drainSegments();
-    await recognitionQueue;
+    drainVadSegments();
+    await recognitionWorker;
   }
 
   return {
+    getStats,
     onFinal,
     onError,
     stop,
   };
 
-  function drainSegments() {
+  function drainVadSegments() {
     while (!vad.isEmpty()) {
       const segment = vad.front();
       vad.pop();
       const index = segmentIndex;
       segmentIndex += 1;
-      enqueueRecognition(index, segment.start, Float32Array.from(segment.samples));
+      enqueueRecognition({
+        index,
+        start: segment.start,
+        samples: Float32Array.from(segment.samples),
+      });
     }
   }
 
-  function enqueueRecognition(index: number, start: number, samples: Float32Array) {
-    recognitionQueue = recognitionQueue
-      .then(() => recognize(index, start, samples))
-      .catch(error => {
-        reportError(error);
-      });
+  function enqueueRecognition(segment: PendingSegment) {
+    while (
+      queuedSamples + segment.samples.length > maxQueuedSamples &&
+      pendingSegments.length > 0
+    ) {
+      const dropped = pendingSegments.shift()!;
+      queuedSamples -= dropped.samples.length;
+      droppedSegments += 1;
+      logger.warn(`ASR 积压过高，丢弃最旧语音段 #${dropped.index}`);
+    }
+
+    if (
+      segment.samples.length > maxQueuedSamples ||
+      queuedSamples + segment.samples.length > maxQueuedSamples
+    ) {
+      droppedSegments += 1;
+      logger.warn(`ASR 语音段 #${segment.index} 超过积压上限，已丢弃`);
+      return;
+    }
+
+    pendingSegments.push(segment);
+    queuedSamples += segment.samples.length;
+    startRecognitionWorker();
   }
 
-  async function recognize(index: number, start: number, samples: Float32Array) {
-    if (samples.length === 0) {
+  function startRecognitionWorker() {
+    if (recognitionWorker) {
       return;
+    }
+
+    const worker = drainRecognitionQueue().finally(() => {
+      if (recognitionWorker === worker) {
+        recognitionWorker = undefined;
+      }
+    });
+    recognitionWorker = worker;
+  }
+
+  async function drainRecognitionQueue() {
+    while (pendingSegments.length > 0) {
+      const segment = pendingSegments.shift()!;
+      queuedSamples -= segment.samples.length;
+      activeSamples = segment.samples.length;
+      const audioDurationMs = (segment.samples.length / config.asr.sampleRate) * 1_000;
+      const decodeStartedAt = performance.now();
+
+      try {
+        const hasText = await recognize(segment);
+        decodedSegments += 1;
+        if (!hasText) {
+          emptySegments += 1;
+        }
+      } catch (error) {
+        failedSegments += 1;
+        reportError(error);
+      } finally {
+        lastDecodeMs = performance.now() - decodeStartedAt;
+        lastRealTimeFactor = audioDurationMs > 0 ? lastDecodeMs / audioDurationMs : undefined;
+        activeSamples = 0;
+      }
+    }
+  }
+
+  async function recognize(segment: PendingSegment) {
+    if (segment.samples.length === 0) {
+      return false;
     }
 
     const stream = recognizer.createStream();
     stream.acceptWaveform({
-      samples,
+      samples: segment.samples,
       sampleRate: config.asr.sampleRate,
     });
 
     const result = await recognizer.decodeAsync(stream);
     const text = result.text?.trim();
 
-    if (text) {
-      const mediaStartMs = (start / config.asr.sampleRate) * 1_000;
-      const mediaEndMs = mediaStartMs + (samples.length / config.asr.sampleRate) * 1_000;
-      const epochMs = mediaEpochMs ?? Date.now() - mediaEndMs;
-
-      emitter.emit('final', {
-        index,
-        text,
-        startTimeMs: epochMs + mediaStartMs,
-        endTimeMs: epochMs + mediaEndMs,
-        mediaStartMs,
-        mediaEndMs,
-      } satisfies HearingFinalEvent);
-      logger.info(`#${index} ${text}`);
+    if (!text) {
+      return false;
     }
+
+    const mediaStartMs = (segment.start / config.asr.sampleRate) * 1_000;
+    const mediaEndMs = mediaStartMs + (segment.samples.length / config.asr.sampleRate) * 1_000;
+    const epochMs = mediaEpochMs ?? Date.now() - mediaEndMs;
+
+    emitter.emit('final', {
+      index: segment.index,
+      text,
+      startTimeMs: epochMs + mediaStartMs,
+      endTimeMs: epochMs + mediaEndMs,
+      mediaStartMs,
+      mediaEndMs,
+    } satisfies HearingFinalEvent);
+    logger.info(`#${segment.index} ${text}`);
+    return true;
   }
 
   function reportError(error: unknown) {

@@ -38,3 +38,4 @@ models/
 dd.config.ts
 
 .dd-memory
+.dd-observability

@@ -3,8 +3,9 @@ import type { Readable } from 'node:stream';
 
 import { createNanoEvents } from 'nanoevents';
 
-import { fetchFlvPlayInfo } from '@/bili-api/index.ts';
+import { fetchFlvPlayInfo, type BiliApiRequestOptions } from '@/bili-api/index.ts';
 import { createLogger } from '@/logger/index.ts';
+import { withComponent, type RoomContext } from '@/observability/context.ts';
 
 import type { BliveEvents } from './types.ts';
 
@@ -13,14 +14,36 @@ export * from './types.ts';
 const BROWSER_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
-const FFMPEG_STOP_TIMEOUT_MS = 5_000;
-
-export function createBlive(roomId: number) {
-  const logger = createLogger({ prefix: 'ffmpeg', prefixColor: 'yellow' });
+export function createBlive(
+  roomId: number,
+  apiRequestOptions: BiliApiRequestOptions = {},
+  stopTimeoutMs = 5_000,
+  context?: RoomContext,
+) {
+  const logger = createLogger({
+    prefix: 'ffmpeg',
+    prefixColor: 'yellow',
+    context: context ? withComponent(context, 'ffmpeg') : undefined,
+  });
   let ffmpeg: ChildProcess | undefined;
   let imageBuffer = Buffer.alloc(0);
   let audioSampleCount = 0;
   let imageIndex = 0;
+  let startedAtMs: number | undefined;
+  let lastAudioAtMs: number | undefined;
+  let lastImageAtMs: number | undefined;
+  let lastMediaAtMs: number | undefined;
+  let audioBytes = 0;
+  let audioChunks = 0;
+  let imageFrames = 0;
+  let flvRefreshes = 0;
+  let processStarts = 0;
+  let lastStartDurationMs: number | undefined;
+  let lastRunDurationMs: number | undefined;
+  let lastExitCode: number | null | undefined;
+  let lastExitSignal: NodeJS.Signals | null | undefined;
+  let sigtermTimeouts = 0;
+  let sigkillCount = 0;
   let waitForClose: Promise<void> | undefined;
   let resolveClose: (() => void) | undefined;
   const emitter = createNanoEvents<BliveEvents>();
@@ -54,8 +77,12 @@ export function createBlive(roomId: number) {
       // 移除已消费的数据；若缓冲区里还有下一张图片，循环会继续解析并触发回调。
       imageBuffer = imageBuffer.subarray(end + 2);
       const mediaStartMs = imageIndex * 5_000;
+      const receivedAtMs = Date.now();
+      lastImageAtMs = receivedAtMs;
+      lastMediaAtMs = receivedAtMs;
+      imageFrames += 1;
       emitter.emit('image', image, {
-        receivedAtMs: Date.now(),
+        receivedAtMs,
         mediaStartMs,
         mediaEndMs: mediaStartMs,
       });
@@ -71,7 +98,15 @@ export function createBlive(roomId: number) {
     imageBuffer = Buffer.alloc(0);
     audioSampleCount = 0;
     imageIndex = 0;
+    startedAtMs = Date.now();
+    lastAudioAtMs = undefined;
+    lastImageAtMs = undefined;
+    lastMediaAtMs = undefined;
+    audioBytes = 0;
+    audioChunks = 0;
+    imageFrames = 0;
     const process = createFFmpeg(roomId, flvUrl);
+    processStarts += 1;
     ffmpeg = process;
     waitForClose = new Promise(resolve => {
       resolveClose = resolve;
@@ -79,10 +114,15 @@ export function createBlive(roomId: number) {
 
     process.stdout?.on('data', (chunk: Buffer) => {
       const buffer = Buffer.from(chunk);
+      const receivedAtMs = Date.now();
+      lastAudioAtMs = receivedAtMs;
+      lastMediaAtMs = receivedAtMs;
+      audioBytes += buffer.byteLength;
+      audioChunks += 1;
       const mediaStartMs = (audioSampleCount / 16_000) * 1_000;
       audioSampleCount += Math.floor(buffer.byteLength / 2);
       emitter.emit('audio', buffer, {
-        receivedAtMs: Date.now(),
+        receivedAtMs,
         mediaStartMs,
         mediaEndMs: (audioSampleCount / 16_000) * 1_000,
       });
@@ -94,7 +134,7 @@ export function createBlive(roomId: number) {
     });
 
     process.stderr?.on('data', (chunk: Buffer) => {
-      const message = chunk.toString().trim();
+      const message = redactFFmpegMessage(chunk.toString().trim());
       if (message && !message.includes('deprecated pixel format used')) {
         logger.warn(message);
         emitter.emit('stderr', message);
@@ -107,6 +147,10 @@ export function createBlive(roomId: number) {
     });
 
     process.on('close', (code, signal) => {
+      lastRunDurationMs =
+        startedAtMs === undefined ? undefined : Math.max(0, Date.now() - startedAtMs);
+      lastExitCode = code;
+      lastExitSignal = signal;
       if (ffmpeg === process) {
         ffmpeg = undefined;
         imageBuffer = Buffer.alloc(0);
@@ -122,6 +166,26 @@ export function createBlive(roomId: number) {
 
   function isRunning(): boolean {
     return ffmpeg !== undefined;
+  }
+
+  function getHealth() {
+    return {
+      startedAtMs,
+      lastAudioAtMs,
+      lastImageAtMs,
+      lastMediaAtMs,
+      audioBytes,
+      audioChunks,
+      imageFrames,
+      flvRefreshes,
+      processStarts,
+      lastStartDurationMs,
+      lastRunDurationMs,
+      lastExitCode,
+      lastExitSignal,
+      sigtermTimeouts,
+      sigkillCount,
+    };
   }
 
   function onAudio(callback: BliveEvents['audio']) {
@@ -145,7 +209,11 @@ export function createBlive(roomId: number) {
   }
 
   async function start(): Promise<void> {
-    startUrl(await fetchFlvPlayInfo(roomId));
+    const requestStartedAt = performance.now();
+    const flvUrl = await fetchFlvPlayInfo(roomId, apiRequestOptions);
+    flvRefreshes += 1;
+    startUrl(flvUrl);
+    lastStartDurationMs = performance.now() - requestStartedAt;
   }
 
   async function stop(signal: NodeJS.Signals = 'SIGTERM'): Promise<boolean> {
@@ -160,17 +228,20 @@ export function createBlive(roomId: number) {
       return false;
     }
 
-    const closed = await waitWithTimeout(closePromise, FFMPEG_STOP_TIMEOUT_MS);
+    const closed = await waitWithTimeout(closePromise, stopTimeoutMs);
     if (!closed && ffmpeg === activeProcess) {
+      sigtermTimeouts += 1;
+      sigkillCount += 1;
       logger.warn('FFmpeg 未在超时内退出，发送 SIGKILL');
       activeProcess.kill('SIGKILL');
-      await waitWithTimeout(closePromise, FFMPEG_STOP_TIMEOUT_MS);
+      await waitWithTimeout(closePromise, stopTimeoutMs);
     }
     return true;
   }
 
   return {
     roomId,
+    getHealth,
     isRunning,
     onAudio,
     onImage,
@@ -181,6 +252,10 @@ export function createBlive(roomId: number) {
     startUrl,
     stop,
   };
+}
+
+function redactFFmpegMessage(message: string): string {
+  return message.replace(/https?:\/\/\S+/giu, '[REDACTED_URL]');
 }
 
 function waitWithTimeout(promise: Promise<void>, timeoutMs: number): Promise<boolean> {

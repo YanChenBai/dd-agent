@@ -45,8 +45,16 @@ export function createRoomCatalog(
     }
   }
 
+  function markUnavailable(roomId: number) {
+    const candidate = candidates.get(roomId);
+    if (candidate) {
+      candidate.unavailable = true;
+    }
+  }
+
   return {
     getAll,
+    markUnavailable,
     markWatched,
     loadMore,
     refresh,
@@ -65,10 +73,10 @@ export function createRoomCatalog(
   function snapshot(batch: number) {
     return { batch, candidates: getAll() };
   }
-}
 
-function logRooms(rooms: readonly LiveRoomCandidate[]) {
-  for (const room of rooms) {
-    console.log(`直播间：${room.roomId}｜主播：${room.anchor}｜标题：${room.title}`);
+  function logRooms(rooms: readonly LiveRoomCandidate[]) {
+    for (const room of rooms) {
+      logger.info(`直播间：${room.roomId}｜主播：${room.anchor}｜标题：${room.title}`);
+    }
   }
 }

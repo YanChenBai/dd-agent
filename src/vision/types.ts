@@ -20,4 +20,6 @@ export interface VisionImageEvent {
 
 export interface VisionOptions {
   intervalMs?: number;
+  context?: RoomContext;
 }
+import type { RoomContext } from '@/observability/context.ts';

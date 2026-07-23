@@ -7,20 +7,21 @@ export function createExploreInstructions(agentName: string) {
 
 目标：
 - 优先选择标题清晰、看起来适合自然互动的直播间。
-- 可以调用 loadMoreRooms 继续向下滚动，通过无限加载寻找更多主播；不要只看最初的一批直播间。
+- 不要只看最初的一批直播间。如果当前候选还不足以做出满意选择，返回 continue=true，由程序继续向下滚动加载。
 - 不要反复进入同一个直播间，除非它明显值得继续看。
-- 每次进入前必须结合主播名和直播标题判断初始观看时长，并在 seeRoom.reason 中明确说明判断依据。低兴趣或信息较少可先看 1–3 分钟，中等兴趣看 4–10 分钟，高兴趣看 11–30 分钟，特别感兴趣可看更久，最多 ${formatDuration(60 * 60 * 1_000)}。
-- 不要机械地给每个直播间相同的 durationMinutes，也不要只根据房间号决定时长；主播名未知时，应根据标题中可识别的主播名和内容判断。
-- 进入后至少观察 1 分钟。Brain 可以用正数延长或负数缩短计划观看时长；如果明确不喜欢，可以直接触发切换，不必等待原计划结束。
+- 选择直播间时必须结合主播名和直播标题判断，并在 reason 中明确说明依据；不要只根据房间号决定。
+- 进入后先观察至少 1 分钟。Brain 会根据实时内容延长或缩短计划观看时长；如果明确不喜欢，可以直接触发切换。
 - 进入直播间后，房间内的 Brain 会根据实时语音和画面触发继续观看或切换事件。优先遵循 Brain 的实时判断：调整时长时更新当前计划，建议切换时不要再次进入同一直播间。
 - 总运行时间接近上限时必须结束。
 
 安全边界：
-- 只使用工具提供的直播间列表和观看工具。
+- 只能选择当前直播间列表中未标记“已下播”的 roomId。
 - 不要要求绕过平台限制、刷屏、诱导消费或骚扰主播。
-- 如果直播间不够、页面不可用或已经浏览充分，调用 finish。
+- 如果还想查看更多候选，返回 {"continue":true,"roomId":null,"reason":"原因"}。
+- 如果选择一个房间，返回 {"continue":false,"roomId":房间号,"reason":"选择原因"}。
+- 如果页面不可用、已经浏览充分且没有想看的房间，返回 {"continue":false,"roomId":null,"reason":"结束原因"}。
 
-每一步都要简洁说明选择理由。`;
+只返回符合上述结构的 JSON。`;
 }
 
 export function createExplorePrompt(input: {
@@ -41,7 +42,7 @@ ${formatCandidates(input.candidates)}
 已观察房间：
 ${formatWatched(input.watched)}
 
-请开始到处 D。`;
+请返回本轮探索决策。`;
 }
 
 function formatCandidates(candidates: readonly LiveRoomCandidate[]) {
@@ -52,7 +53,8 @@ function formatCandidates(candidates: readonly LiveRoomCandidate[]) {
   return candidates
     .map(candidate => {
       const watched = candidate.watched ? `，已看 ${candidate.watched} 次` : '';
-      return `- ${candidate.roomId}｜${candidate.anchor}｜${candidate.title}${watched}`;
+      const unavailable = candidate.unavailable ? '，已下播，不可选择' : '';
+      return `- ${candidate.roomId}｜${candidate.anchor}｜${candidate.title}${watched}${unavailable}`;
     })
     .join('\n');
 }

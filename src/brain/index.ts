@@ -6,8 +6,16 @@ import { createNanoEvents } from 'nanoevents';
 import { z } from 'zod';
 
 import type { DDConfig } from '@/config/index.ts';
+import { formatDurationMs } from '@/logger/format.ts';
 import { createLogger } from '@/logger/index.ts';
 import type { Memory, MemoryRecord, TimeRange } from '@/memory/types.ts';
+import { withComponent, type RoomContext } from '@/observability/context.ts';
+import {
+  addFailedTokenRequest,
+  addTokenUsage,
+  createTokenUsageReport,
+  snapshotTokenUsage,
+} from '@/observability/token-usage.ts';
 import type { DDMode } from '@/types/index.ts';
 import { createEventHandlers } from '@/utils/events.ts';
 
@@ -52,17 +60,22 @@ const exploreOutput = Output.object({
     }),
 });
 
-const logger = createLogger({ prefix: 'brain', prefixColor: 'green' });
-
 export function createBrain(
   memory: Memory,
   context: BrainContext,
   config: DDConfig,
   mode: DDMode = 'single',
+  logContext?: RoomContext,
 ) {
+  const logger = createLogger({
+    prefix: 'brain',
+    prefixColor: 'green',
+    context: logContext ? withComponent(logContext, 'brain') : undefined,
+  });
   const emitter = createNanoEvents<BrainEvents>();
   const eventHandlers = createEventHandlers(emitter);
   const agent = createBrainAgent(config, context, mode);
+  const tokenUsage = createTokenUsageReport();
   const history: Array<{ user: string; assistant: string }> = [];
   let queue = Promise.resolve();
   let timer: NodeJS.Timeout | undefined;
@@ -159,6 +172,7 @@ export function createBrain(
     const { prompt, content } = createPollContent(range, hearing, vision);
     const controller = new AbortController();
     requestController = controller;
+    const requestStartedAt = performance.now();
     const result = await agent
       .generate({
         abortSignal: controller.signal,
@@ -174,11 +188,25 @@ export function createBrain(
           },
         ],
       })
+      .then(
+        result => {
+          addTokenUsage(tokenUsage, result.usage);
+          return result;
+        },
+        error => {
+          addFailedTokenRequest(tokenUsage);
+          throw error;
+        },
+      )
       .finally(() => {
         if (requestController === controller) {
           requestController = undefined;
         }
       });
+
+    logger.info(
+      `AI 请求完成：${formatDurationMs(performance.now() - requestStartedAt)}，tokens ${result.usage.inputTokens ?? '?'}+${result.usage.outputTokens ?? '?'}=${result.usage.totalTokens ?? '?'}，finish=${result.finishReason}`,
+    );
 
     if (!running) {
       return;
@@ -318,6 +346,10 @@ export function createBrain(
     return queue;
   }
 
+  function getTokenUsage() {
+    return snapshotTokenUsage(tokenUsage);
+  }
+
   return {
     start,
     stop,
@@ -329,6 +361,7 @@ export function createBrain(
     onError: eventHandlers.onError,
     getLatestDecision,
     getLatestResult,
+    getTokenUsage,
     setPlannedWatchEndAt,
     idle,
   };

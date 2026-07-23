@@ -4,8 +4,9 @@ import puppeteer, { type Browser, type Page } from 'puppeteer';
 
 import type { DDConfig } from '@/config/index.ts';
 import { createLogger } from '@/logger/index.ts';
+import { withComponent, type RoomContext } from '@/observability/context.ts';
 
-import type { HandEvents, HandStatus, HandStatusEvent } from './types.ts';
+import type { HandEvents, HandStats, HandStatus, HandStatusEvent } from './types.ts';
 
 export * from './types.ts';
 
@@ -17,14 +18,21 @@ const BROWSER_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
 
-export function createHand(roomId: number, config: DDConfig) {
-  const logger = createLogger({ prefix: 'hand', prefixColor: 'yellow' });
+export function createHand(roomId: number, config: DDConfig, context?: RoomContext) {
+  const logger = createLogger({
+    prefix: 'hand',
+    prefixColor: 'yellow',
+    context: context ? withComponent(context, 'hand') : undefined,
+  });
   let browser: Browser | undefined;
   let livePage: Page | undefined;
   let status: HandStatus = 'idle';
   let startPromise: Promise<void> | undefined;
   let stopPromise: Promise<void> | undefined;
   let stopRequested = false;
+  let attemptedMessages = 0;
+  let sentMessages = 0;
+  let failedMessages = 0;
   const emitter = createNanoEvents<HandEvents>();
   const sendAbortController = new AbortController();
   const sendQueue = new PQueue({
@@ -114,7 +122,7 @@ export function createHand(roomId: number, config: DDConfig) {
         timeout: PAGE_TIMEOUT_MS,
       });
       logger.info(`直播间页面已响应：${response?.status() ?? '无响应状态'} ${page.url()}`);
-      await page.waitForFunction(`typeof globalThis.livePlayer?.sendDanmaku === 'function'`, {
+      await page.waitForFunction(`typeof window.livePlayer?.sendDanmaku === 'function'`, {
         timeout: PAGE_TIMEOUT_MS,
       });
       await startPlayback(page).catch(error => {
@@ -144,6 +152,16 @@ export function createHand(roomId: number, config: DDConfig) {
 
   function getStatus(): HandStatus {
     return status;
+  }
+
+  function getStats(): HandStats {
+    return {
+      queuedMessages: sendQueue.size,
+      activeMessages: sendQueue.pending,
+      attemptedMessages,
+      sentMessages,
+      failedMessages,
+    };
   }
 
   function onStatus(callback: HandEvents['status']) {
@@ -184,8 +202,15 @@ export function createHand(roomId: number, config: DDConfig) {
         sendQueue
           .add(
             async () => {
-              await sendMessage(livePage, message);
-              logger.success(`已发送弹幕：${message}`);
+              attemptedMessages += 1;
+              try {
+                await sendMessage(livePage, message);
+                sentMessages += 1;
+                logger.success(`已发送弹幕：${message}`);
+              } catch (error) {
+                failedMessages += 1;
+                throw error;
+              }
             },
             {
               signal: sendAbortController.signal,
@@ -232,6 +257,7 @@ export function createHand(roomId: number, config: DDConfig) {
   return {
     roomId,
     getStatus,
+    getStats,
     onStatus,
     onError,
     start,
@@ -247,27 +273,45 @@ async function sendMessage(page: Page | undefined, message: string) {
   }
 
   const result = await page.evaluate(async message => {
-    try {
-      const root = globalThis as typeof globalThis & {
-        livePlayer?: {
-          sendDanmaku?: (payload: { msg: string }) => Promise<{
-            code?: number;
-            message?: string;
-            msg?: string;
-          }>;
-        };
+    const root = globalThis as typeof globalThis & {
+      livePlayer?: {
+        sendDanmaku?: (payload: { msg: string }) => Promise<{
+          code?: number;
+          message?: string;
+          msg?: string;
+        } | void>;
       };
-      return await root.livePlayer?.sendDanmaku?.({ msg: message });
+    };
+    const sendDanmaku = root.livePlayer?.sendDanmaku;
+    if (typeof sendDanmaku !== 'function') {
+      return {
+        ok: false as const,
+        error: 'Bilibili livePlayer.sendDanmaku is unavailable',
+      };
+    }
+
+    try {
+      const response = await sendDanmaku.call(root.livePlayer, { msg: message });
+      if (response?.code !== undefined && response.code !== 0) {
+        return {
+          ok: false as const,
+          error:
+            response.message ||
+            response.msg ||
+            `Bilibili rejected danmaku with code ${response.code}`,
+        };
+      }
+      return { ok: true as const };
     } catch (error) {
       return {
-        code: -1,
-        message: error instanceof Error ? error.message : String(error),
+        ok: false as const,
+        error: error instanceof Error ? error.message : String(error),
       };
     }
   }, message);
 
-  if (result?.code !== 0) {
-    throw new Error(result?.message || result?.msg || 'Failed to send danmaku through livePlayer');
+  if (!result.ok) {
+    throw new Error(result.error);
   }
 }
 
