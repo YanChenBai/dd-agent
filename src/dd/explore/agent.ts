@@ -9,10 +9,10 @@ import type { ExploreTools } from './tools.ts';
 
 export function createExploreAgent(config: DDConfig, tools: ExploreTools, logger: ConsolaInstance) {
   const provider = createOpenAICompatible({
-    name: 'openrouter',
+    name: 'openai-compatible',
     apiKey: config.ai.apiKey,
     baseURL: config.ai.baseUrl,
-    supportsStructuredOutputs: true,
+    supportsStructuredOutputs: config.ai.supportsStructuredOutputs,
   });
 
   return new ToolLoopAgent({

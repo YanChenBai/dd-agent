@@ -9,4 +9,5 @@ export interface HearingFinalEvent {
 
 export interface HearingEvents {
   final: (event: HearingFinalEvent) => void;
+  error: (error: Error) => void;
 }

@@ -1,4 +1,4 @@
-import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import type { HearingFinalEvent } from '@/hearing/types.ts';
@@ -12,6 +12,7 @@ export * from './types.ts';
 export function createMemory(retentionMs: number, visionDir: string) {
   const records: MemoryRecord[] = [];
   mkdirSync(visionDir, { recursive: true });
+  removeStaleVisionFiles(visionDir, retentionMs);
 
   function addHearing(event: HearingFinalEvent): void {
     add({
@@ -48,11 +49,19 @@ export function createMemory(retentionMs: number, visionDir: string) {
     return records.length;
   }
 
+  function clear(): void {
+    for (const record of records) {
+      removeVisionFile(record);
+    }
+    records.length = 0;
+  }
+
   return {
     addHearing,
     addVision,
     query,
     getSize,
+    clear,
   };
 
   function add(record: MemoryRecord) {
@@ -74,6 +83,25 @@ export function createMemory(retentionMs: number, visionDir: string) {
       for (const record of records.splice(0, firstRetained)) {
         removeVisionFile(record);
       }
+    }
+  }
+}
+
+function removeStaleVisionFiles(visionDir: string, retentionMs: number) {
+  const cutoff = Date.now() - retentionMs;
+
+  for (const name of readdirSync(visionDir)) {
+    if (!name.endsWith('.jpg')) {
+      continue;
+    }
+
+    const filePath = resolve(visionDir, name);
+    try {
+      if (statSync(filePath).mtimeMs < cutoff) {
+        unlinkSync(filePath);
+      }
+    } catch {
+      // Another process may have removed the file between listing and inspection.
     }
   }
 }

@@ -9,16 +9,16 @@
 ```text
 Bilibili FLV 直播流（fetchFlvPlayInfo）
   ├─ 音频 → VAD → SenseVoice 语音识别 ─┐
-  └─ 视频 → 定时抽帧 → 2×2 画面拼图 ───┼─ 短期记忆 → 多模态模型 → 弹幕
-                                       ├─ 终端预览
-                                       └─ 嘴（Puppeteer）→ Bilibili 直播间
+  └─ 视频 → 定时抽帧 → 2×2 画面拼图 ───┴→ 短期记忆 → 多模态模型 → 生成弹幕
+                                                                    ├→ 终端预览
+                                                                    └→ Puppeteer 发送到 Bilibili 直播间
 ```
 
 - 通过 `fetchFlvPlayInfo` 获取 FLV 地址并交给 FFmpeg，每 5 秒抽取一帧画面，同时输出 16 kHz 单声道 PCM 音频。
-- “嘴”模块始终启动 Puppeteer 并复用持久化登录态；是否实际向当前直播间发送弹幕由配置开关控制。
+- “手”模块始终启动 Puppeteer 并复用持久化登录态；是否实际向当前直播间发送弹幕由配置开关控制。
 - 使用 sherpa-onnx、SenseVoice 和 Silero VAD（或 TEN VAD）在本地识别主播语音。
-- 每 20 秒组合最近四帧，并与近期字幕一起交给 OpenAI 兼容的多模态模型。
-- 默认仅在终端预览生成结果；启用发送后，每 20 秒最多发送一条，以避免刷屏。
+- 每 20 秒组合最近四帧；大脑默认每 30 秒读取近期字幕和画面，并交给 OpenAI 兼容的多模态模型。
+- 默认仅在终端预览生成结果；启用发送后，默认每 30 秒最多发送一条，以避免刷屏。
 
 ## 环境要求
 
@@ -45,9 +45,15 @@ Bilibili FLV 直播流（fetchFlvPlayInfo）
    └─ silero_vad.onnx
    ```
 
-   也可以在环境变量中通过 `SENSEVOICE_MODEL`、`TOKENS` 和 `VAD_MODEL` 指向其他位置。
+   也可以在 `dd.config.ts` 中通过 `asr.senseVoiceModel`、`asr.tokens` 和 `asr.vad.model` 指向其他位置。
 
-3. 编辑根目录的 [`dd.config.ts`](dd.config.ts)。它使用项目导出的 `defineConfig`，至少需要替换 `ai.apiKey`，并按需要设置 `live.roomId`。
+3. 从示例创建本地配置，然后按需修改：
+
+   ```powershell
+   Copy-Item dd.config.example.ts dd.config.ts
+   ```
+
+   `dd.config.ts` 使用项目导出的 `defineConfig`，AI 模型、API Key、基础地址、结构化输出能力和直播间设置都在这里配置。该文件已被 Git 忽略，请勿提交或分享包含真实 API Key 的版本。
 
 4. 启动单直播间 Agent：
 
@@ -55,7 +61,7 @@ Bilibili FLV 直播流（fetchFlvPlayInfo）
    vpr start -- single
    ```
 
-   `vpr start -- single` 会先生成面向 Node.js 的生产构建，再运行 CLI，不会启用热更新。开发时可使用 `vpr dev -- single` 启动带热更新的 Vite 开发模式。
+   `vpr start -- single` 会先生成面向 Node.js 的生产构建，再运行 CLI。开发时可使用 `vpr dev -- single`，由 Node.js watch 模式在源码变化时重启进程。
 
    按 `Ctrl+C` 安全退出。浏览器会打开当前直播间，首次运行需完成 Bilibili 登录。默认 `live.sendDanmaku=false`，仅预览生成的弹幕；将其改为 `true` 后才会实际发送。
 
@@ -69,7 +75,7 @@ Bilibili FLV 直播流（fetchFlvPlayInfo）
 
 ## 常用配置
 
-完整配置及注释见 [`dd.config.ts`](dd.config.ts)。常用 CLI 命令：
+完整配置及注释见 [`dd.config.example.ts`](dd.config.example.ts)。常用 CLI 命令：
 
 | 命令                  | 说明                                           |
 | --------------------- | ---------------------------------------------- |
@@ -92,7 +98,7 @@ vp check          # 格式化检查、Lint 和类型检查
 vp test           # 运行测试
 vpr build # 构建 Agent
 vpr start -- single  # 构建并运行单直播间 Agent，不启用热更新
-vpr dev -- explore   # 以开发模式运行 ExploreAgent，启用热更新
+vpr dev -- explore   # 以 Node.js watch 模式运行 ExploreAgent
 vpr ready # 依次执行检查、测试和构建
 ```
 

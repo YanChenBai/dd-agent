@@ -88,7 +88,10 @@ describe('createBlive', () => {
     const blive = createBlive(ROOM_ID);
     await blive.start();
 
-    expect(blive.stop()).toBe(true);
+    const stopPromise = blive.stop();
+    ffmpeg.emit('close', 0, 'SIGTERM');
+
+    await expect(stopPromise).resolves.toBe(true);
     expect(ffmpeg.kill).toHaveBeenCalledOnce();
     expect(ffmpeg.kill).toHaveBeenCalledWith('SIGTERM');
   });

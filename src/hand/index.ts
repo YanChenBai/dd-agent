@@ -5,7 +5,7 @@ import puppeteer, { type Browser, type Page } from 'puppeteer';
 import type { DDConfig } from '@/config/index.ts';
 import { createLogger } from '@/logger/index.ts';
 
-import type { MouthEvents, MouthStatus, MouthStatusEvent } from './types.ts';
+import type { HandEvents, HandStatus, HandStatusEvent } from './types.ts';
 
 export * from './types.ts';
 
@@ -17,15 +17,15 @@ const BROWSER_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
 
-export function createMouth(roomId: number, config: DDConfig) {
-  const logger = createLogger({ prefix: 'mouth', prefixColor: 'yellow' });
+export function createHand(roomId: number, config: DDConfig) {
+  const logger = createLogger({ prefix: 'hand', prefixColor: 'yellow' });
   let browser: Browser | undefined;
   let livePage: Page | undefined;
-  let status: MouthStatus = 'idle';
+  let status: HandStatus = 'idle';
   let startPromise: Promise<void> | undefined;
   let stopPromise: Promise<void> | undefined;
   let stopRequested = false;
-  const emitter = createNanoEvents<MouthEvents>();
+  const emitter = createNanoEvents<HandEvents>();
   const sendAbortController = new AbortController();
   const sendQueue = new PQueue({
     concurrency: 1,
@@ -33,10 +33,10 @@ export function createMouth(roomId: number, config: DDConfig) {
     intervalCap: 1,
   });
 
-  const setStatus = (nextStatus: MouthStatus, message: string) => {
+  const setStatus = (nextStatus: HandStatus, message: string) => {
     status = nextStatus;
     logger.info(message);
-    emitter.emit('status', { status: nextStatus, message } satisfies MouthStatusEvent);
+    emitter.emit('status', { status: nextStatus, message } satisfies HandStatusEvent);
   };
 
   const reportError = (error: unknown) => {
@@ -68,11 +68,11 @@ export function createMouth(roomId: number, config: DDConfig) {
         headless: false,
         userDataDir: config.live.browserUserDataDir,
         defaultViewport: null,
-        args: ['--autoplay-policy=no-user-gesture-required', '--no-sandbox'],
+        args: ['--autoplay-policy=no-user-gesture-required'],
       });
 
       if (stopRequested) {
-        throw new Error('Mouth was stopped while the browser was starting');
+        throw new Error('Hand was stopped while the browser was starting');
       }
 
       browser = activeBrowser;
@@ -105,7 +105,7 @@ export function createMouth(roomId: number, config: DDConfig) {
       }
 
       if (stopRequested) {
-        throw new Error('Mouth was stopped before the live room opened');
+        throw new Error('Hand was stopped before the live room opened');
       }
 
       logger.info(`正在打开直播间：${roomId}`);
@@ -122,7 +122,7 @@ export function createMouth(roomId: number, config: DDConfig) {
       });
 
       if (stopRequested) {
-        throw new Error('Mouth was stopped before the live player became ready');
+        throw new Error('Hand was stopped before the live player became ready');
       }
 
       setStatus('ready', `Bilibili danmaku sender ready for room ${roomId}`);
@@ -142,15 +142,15 @@ export function createMouth(roomId: number, config: DDConfig) {
     }
   };
 
-  function getStatus(): MouthStatus {
+  function getStatus(): HandStatus {
     return status;
   }
 
-  function onStatus(callback: MouthEvents['status']) {
+  function onStatus(callback: HandEvents['status']) {
     return emitter.on('status', callback);
   }
 
-  function onError(callback: MouthEvents['error']) {
+  function onError(callback: HandEvents['error']) {
     return emitter.on('error', callback);
   }
 
@@ -162,7 +162,7 @@ export function createMouth(roomId: number, config: DDConfig) {
       return startPromise;
     }
     if (stopRequested) {
-      return Promise.reject(new Error('Cannot start a stopped mouth'));
+      return Promise.reject(new Error('Cannot start a stopped hand'));
     }
 
     const operation = startBrowser();
@@ -176,7 +176,7 @@ export function createMouth(roomId: number, config: DDConfig) {
 
   async function sendDanmaku(messages: readonly string[]) {
     if (status !== 'ready' || !livePage || livePage.isClosed()) {
-      throw reportError(new Error('Cannot send danmaku before the mouth is ready'));
+      throw reportError(new Error('Cannot send danmaku before the hand is ready'));
     }
 
     return Promise.all(
@@ -211,14 +211,14 @@ export function createMouth(roomId: number, config: DDConfig) {
       return stopPromise;
     }
 
-    stopPromise = stopMouth();
+    stopPromise = stopHand();
     return stopPromise;
   }
 
-  async function stopMouth(): Promise<void> {
+  async function stopHand(): Promise<void> {
     stopRequested = true;
     setStatus('stopping', `Stopping Bilibili danmaku sender for room ${roomId}`);
-    sendAbortController.abort(new Error('Mouth stopped'));
+    sendAbortController.abort(new Error('Hand stopped'));
 
     const activeBrowser = browser;
     browser = undefined;
@@ -297,7 +297,7 @@ async function waitForBilibiliLogin(page: Page, timeoutMs: number, isStopped: ()
 
   while (Date.now() - startedAt < timeoutMs) {
     if (isStopped()) {
-      throw new Error('Mouth was stopped while waiting for Bilibili login');
+      throw new Error('Hand was stopped while waiting for Bilibili login');
     }
     if (await isBilibiliLoggedIn(page)) {
       return;

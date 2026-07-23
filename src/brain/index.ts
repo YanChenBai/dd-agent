@@ -72,6 +72,8 @@ export function createBrain(
   let latestResult: BrainResultEvent | undefined;
   let lastActivityTimeMs = Date.now();
   let plannedWatchEndAt: number | undefined;
+  let requestController: AbortController | undefined;
+  let running = false;
 
   function queryWindow(range: TimeRange) {
     const records = memory.query({
@@ -155,18 +157,32 @@ export function createBrain(
     }
 
     const { prompt, content } = createPollContent(range, hearing, vision);
-    const result = await agent.generate({
-      messages: [
-        ...history.flatMap(turn => [
-          { role: 'user' as const, content: turn.user },
-          { role: 'assistant' as const, content: turn.assistant },
-        ]),
-        {
-          role: 'user',
-          content,
-        },
-      ],
-    });
+    const controller = new AbortController();
+    requestController = controller;
+    const result = await agent
+      .generate({
+        abortSignal: controller.signal,
+        timeout: { stepMs: config.ai.requestTimeoutMs },
+        messages: [
+          ...history.flatMap(turn => [
+            { role: 'user' as const, content: turn.user },
+            { role: 'assistant' as const, content: turn.assistant },
+          ]),
+          {
+            role: 'user',
+            content,
+          },
+        ],
+      })
+      .finally(() => {
+        if (requestController === controller) {
+          requestController = undefined;
+        }
+      });
+
+    if (!running) {
+      return;
+    }
 
     const output = result.output as BrainOutput;
     history.push({
@@ -212,6 +228,9 @@ export function createBrain(
   }
 
   function queuePoll(endTimeMs: number): void {
+    if (!running) {
+      return;
+    }
     pendingPollEndTimeMs = Math.max(pendingPollEndTimeMs ?? 0, endTimeMs);
     if (pollQueued) {
       return;
@@ -228,6 +247,9 @@ export function createBrain(
         await processPoll(pollEndTimeMs);
       })
       .catch(error => {
+        if (!running) {
+          return;
+        }
         const value = error instanceof Error ? error : new Error(String(error));
         logger.error(value);
         emitter.emit('error', value);
@@ -241,10 +263,11 @@ export function createBrain(
   }
 
   function start(): void {
-    if (timer) {
+    if (running) {
       return;
     }
 
+    running = true;
     const now = Date.now();
     lastActivityTimeMs = now;
     lastPollTimeMs = Math.max(0, now - config.memory.brainContextWindowMs);
@@ -255,11 +278,17 @@ export function createBrain(
   }
 
   function stop(): void {
-    if (!timer) {
+    if (!running) {
       return;
     }
 
-    clearInterval(timer);
+    running = false;
+    pendingPollEndTimeMs = undefined;
+    requestController?.abort(new Error('Brain stopped'));
+    requestController = undefined;
+    if (timer) {
+      clearInterval(timer);
+    }
     timer = undefined;
   }
 
@@ -307,23 +336,16 @@ export function createBrain(
 
 function createBrainAgent(config: DDConfig, context: BrainContext, mode: DDMode) {
   const provider = createOpenAICompatible({
-    name: 'openrouter',
+    name: 'openai-compatible',
     apiKey: config.ai.apiKey,
     baseURL: config.ai.baseUrl,
-    supportsStructuredOutputs: true,
+    supportsStructuredOutputs: config.ai.supportsStructuredOutputs,
   });
 
   return new ToolLoopAgent({
     model: provider.chatModel(config.ai.model),
     instructions: createBrainInstructions(config.agent.name, context, mode),
     output: mode === 'explore' ? exploreOutput : singleOutput,
-    providerOptions: {
-      openrouter: {
-        provider: {
-          require_parameters: true,
-        },
-      },
-    },
     stopWhen: stepCountIs(1),
     temperature: 0.7,
   });

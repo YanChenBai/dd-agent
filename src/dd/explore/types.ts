@@ -35,4 +35,5 @@ export interface ExploreOptions {
   observeRoomMs?: number;
   candidateLimit?: number;
   sendDanmakuEnabled?: boolean;
+  signal?: AbortSignal;
 }

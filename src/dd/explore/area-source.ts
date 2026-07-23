@@ -62,7 +62,7 @@ export function createLiveAreaSource(areaUrl: string, config: DDConfig) {
       headless: false,
       userDataDir: `${config.live.browserUserDataDir}-explore`,
       defaultViewport: null,
-      args: ['--no-sandbox', '--start-maximized'],
+      args: ['--start-maximized'],
     });
 
     page = (await browser.pages())[0] ?? (await browser.newPage());

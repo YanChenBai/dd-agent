@@ -33,6 +33,7 @@ export function startHearing(blive: Pick<Blive, 'onAudio'>, config: DDConfig) {
   let currentInputSampleRate = 0;
   let segmentIndex = 0;
   let mediaEpochMs: number | undefined;
+  let recognitionQueue = Promise.resolve();
   let stopped = false;
 
   const unsubscribeAudio = blive.onAudio((buffer, timing) => {
@@ -42,27 +43,30 @@ export function startHearing(blive: Pick<Blive, 'onAudio'>, config: DDConfig) {
 
     mediaEpochMs ??= timing.receivedAtMs - timing.mediaEndMs;
 
-    const mono = pcmS16leToFloat32(buffer);
-    const samples = resampleIfNeeded(mono, BLIVE_SAMPLE_RATE);
+    try {
+      const mono = pcmS16leToFloat32(buffer);
+      const samples = resampleIfNeeded(mono, BLIVE_SAMPLE_RATE);
 
-    vadBuffer.push(samples);
+      vadBuffer.push(samples);
 
-    while (vadBuffer.size() >= vadWindowSize) {
-      const window = vadBuffer.get(vadBuffer.head(), vadWindowSize);
-      vadBuffer.pop(vadWindowSize);
-      vad.acceptWaveform(window);
-    }
+      while (vadBuffer.size() >= vadWindowSize) {
+        const window = vadBuffer.get(vadBuffer.head(), vadWindowSize);
+        vadBuffer.pop(vadWindowSize);
+        vad.acceptWaveform(window);
+      }
 
-    while (!vad.isEmpty()) {
-      const segment = vad.front();
-      vad.pop();
-      printFinal(segment.start, segment.samples);
-      segmentIndex += 1;
+      drainSegments();
+    } catch (error) {
+      reportError(error);
     }
   });
 
   function onFinal(callback: HearingEvents['final']) {
     return emitter.on('final', callback);
+  }
+
+  function onError(callback: HearingEvents['error']) {
+    return emitter.on('error', callback);
   }
 
   async function stop(): Promise<void> {
@@ -73,14 +77,35 @@ export function startHearing(blive: Pick<Blive, 'onAudio'>, config: DDConfig) {
     stopped = true;
     unsubscribeAudio();
     vad.flush();
+    drainSegments();
+    await recognitionQueue;
   }
 
   return {
     onFinal,
+    onError,
     stop,
   };
 
-  function printFinal(start: number, samples: Float32Array) {
+  function drainSegments() {
+    while (!vad.isEmpty()) {
+      const segment = vad.front();
+      vad.pop();
+      const index = segmentIndex;
+      segmentIndex += 1;
+      enqueueRecognition(index, segment.start, Float32Array.from(segment.samples));
+    }
+  }
+
+  function enqueueRecognition(index: number, start: number, samples: Float32Array) {
+    recognitionQueue = recognitionQueue
+      .then(() => recognize(index, start, samples))
+      .catch(error => {
+        reportError(error);
+      });
+  }
+
+  async function recognize(index: number, start: number, samples: Float32Array) {
     if (samples.length === 0) {
       return;
     }
@@ -91,8 +116,7 @@ export function startHearing(blive: Pick<Blive, 'onAudio'>, config: DDConfig) {
       sampleRate: config.asr.sampleRate,
     });
 
-    recognizer.decode(stream);
-    const result = recognizer.getResult(stream);
+    const result = await recognizer.decodeAsync(stream);
     const text = result.text?.trim();
 
     if (text) {
@@ -101,14 +125,24 @@ export function startHearing(blive: Pick<Blive, 'onAudio'>, config: DDConfig) {
       const epochMs = mediaEpochMs ?? Date.now() - mediaEndMs;
 
       emitter.emit('final', {
-        index: segmentIndex,
+        index,
         text,
         startTimeMs: epochMs + mediaStartMs,
         endTimeMs: epochMs + mediaEndMs,
         mediaStartMs,
         mediaEndMs,
       } satisfies HearingFinalEvent);
-      logger.info(`#${segmentIndex} ${text}`);
+      logger.info(`#${index} ${text}`);
+    }
+  }
+
+  function reportError(error: unknown) {
+    const value = error instanceof Error ? error : new Error(String(error));
+    if (stopped) {
+      logger.warn(value);
+    } else {
+      logger.error(value);
+      emitter.emit('error', value);
     }
   }
 

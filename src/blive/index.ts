@@ -13,6 +13,7 @@ export * from './types.ts';
 const BROWSER_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
+const FFMPEG_STOP_TIMEOUT_MS = 5_000;
 
 export function createBlive(roomId: number) {
   const logger = createLogger({ prefix: 'ffmpeg', prefixColor: 'yellow' });
@@ -20,6 +21,8 @@ export function createBlive(roomId: number) {
   let imageBuffer = Buffer.alloc(0);
   let audioSampleCount = 0;
   let imageIndex = 0;
+  let waitForClose: Promise<void> | undefined;
+  let resolveClose: (() => void) | undefined;
   const emitter = createNanoEvents<BliveEvents>();
 
   const consumeImageData = (chunk: Buffer) => {
@@ -70,6 +73,9 @@ export function createBlive(roomId: number) {
     imageIndex = 0;
     const process = createFFmpeg(roomId, flvUrl);
     ffmpeg = process;
+    waitForClose = new Promise(resolve => {
+      resolveClose = resolve;
+    });
 
     process.stdout?.on('data', (chunk: Buffer) => {
       const buffer = Buffer.from(chunk);
@@ -107,6 +113,8 @@ export function createBlive(roomId: number) {
         audioSampleCount = 0;
         imageIndex = 0;
       }
+      resolveClose?.();
+      resolveClose = undefined;
       logger.info(`已关闭（code=${String(code)}, signal=${String(signal)}）`);
       emitter.emit('close', code, signal);
     });
@@ -140,8 +148,25 @@ export function createBlive(roomId: number) {
     startUrl(await fetchFlvPlayInfo(roomId));
   }
 
-  function stop(signal: NodeJS.Signals = 'SIGTERM'): boolean {
-    return ffmpeg?.kill(signal) ?? false;
+  async function stop(signal: NodeJS.Signals = 'SIGTERM'): Promise<boolean> {
+    const activeProcess = ffmpeg;
+    const closePromise = waitForClose;
+    if (!activeProcess || !closePromise) {
+      return false;
+    }
+
+    const killed = activeProcess.kill(signal);
+    if (!killed) {
+      return false;
+    }
+
+    const closed = await waitWithTimeout(closePromise, FFMPEG_STOP_TIMEOUT_MS);
+    if (!closed && ffmpeg === activeProcess) {
+      logger.warn('FFmpeg 未在超时内退出，发送 SIGKILL');
+      activeProcess.kill('SIGKILL');
+      await waitWithTimeout(closePromise, FFMPEG_STOP_TIMEOUT_MS);
+    }
+    return true;
   }
 
   return {
@@ -156,6 +181,16 @@ export function createBlive(roomId: number) {
     startUrl,
     stop,
   };
+}
+
+function waitWithTimeout(promise: Promise<void>, timeoutMs: number): Promise<boolean> {
+  return new Promise(resolve => {
+    const timeout = setTimeout(() => resolve(false), timeoutMs);
+    void promise.then(() => {
+      clearTimeout(timeout);
+      resolve(true);
+    });
+  });
 }
 
 function createFFmpeg(roomId: number, flvUrl: string) {

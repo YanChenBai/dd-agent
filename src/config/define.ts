@@ -1,4 +1,5 @@
 import { createDefineConfig } from 'c12';
+import { z } from 'zod';
 
 export interface DDConfig {
   /** Agent 运行行为。 */
@@ -33,6 +34,10 @@ export interface DDConfig {
     apiKey: string;
     /** OpenAI 兼容 API 的基础地址。 */
     baseUrl: string;
+    /** Provider 是否支持 JSON Schema 结构化输出。 */
+    supportsStructuredOutputs: boolean;
+    /** 单次模型请求的总超时时间（毫秒）。 */
+    requestTimeoutMs: number;
   };
   /** 短期记忆设置。 */
   memory: {
@@ -107,3 +112,75 @@ type DeepPartial<T> = {
 };
 
 export const defineConfig = createDefineConfig<DDConfigInput>();
+
+const positiveInteger = z.number().int().positive();
+const nonNegativeInteger = z.number().int().nonnegative();
+
+export const ddConfigSchema = z
+  .object({
+    agent: z.object({
+      name: z.string().trim().min(1),
+      stopAfterMs: nonNegativeInteger,
+      danmakuIntervalMs: positiveInteger,
+      danmakuHistoryTurns: nonNegativeInteger,
+    }),
+    live: z.object({
+      roomId: positiveInteger,
+      sendDanmaku: z.boolean(),
+      streamerAliases: z.array(z.string().trim().min(1)),
+      browserUserDataDir: z.string().trim().min(1),
+      loginTimeoutMs: positiveInteger,
+    }),
+    ai: z.object({
+      model: z.string().trim().min(1),
+      apiKey: z.string().trim().min(1, 'ai.apiKey is required'),
+      baseUrl: z.url(),
+      supportsStructuredOutputs: z.boolean(),
+      requestTimeoutMs: positiveInteger,
+    }),
+    memory: z.object({
+      retentionMs: positiveInteger,
+      visionDir: z.string().trim().min(1),
+      brainContextWindowMs: positiveInteger,
+      brainContextImages: positiveInteger,
+    }),
+    asr: z.object({
+      sampleRate: positiveInteger,
+      maxPendingSeconds: positiveInteger,
+      provider: z.string().trim().min(1),
+      numThreads: positiveInteger,
+      vadNumThreads: positiveInteger,
+      debug: z.boolean(),
+      senseVoiceModel: z.string().trim().min(1),
+      tokens: z.string().trim().min(1),
+      featureDim: positiveInteger,
+      useItn: z.boolean(),
+      vad: z.object({
+        kind: z.enum(['silero', 'ten']),
+        model: z.string().trim().min(1),
+        threshold: z.number().min(0).max(1),
+        minSpeechSeconds: z.number().nonnegative(),
+        minSilenceSeconds: z.number().nonnegative(),
+        windowSize: positiveInteger,
+      }),
+    }),
+    explore: z.object({
+      areaUrl: z.url(),
+      maxRunMs: positiveInteger,
+      observeRoomMs: positiveInteger,
+      candidateLimit: positiveInteger,
+    }),
+  })
+  .superRefine((config, context) => {
+    if (config.memory.brainContextWindowMs > config.memory.retentionMs) {
+      context.addIssue({
+        code: 'custom',
+        path: ['memory', 'brainContextWindowMs'],
+        message: 'brainContextWindowMs must not exceed retentionMs',
+      });
+    }
+  });
+
+export function parseDDConfig(value: unknown): DDConfig {
+  return ddConfigSchema.parse(value) as DDConfig;
+}

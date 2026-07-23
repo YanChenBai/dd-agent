@@ -35,10 +35,11 @@ export interface WatchManagerOptions {
   maxRunMs: number;
   observeRoomMs: number;
   sendDanmakuEnabled: boolean;
+  signal?: AbortSignal;
 }
 
 export function createWatchManager(options: WatchManagerOptions) {
-  const { exploreStartedAt, logger, maxRunMs, observeRoomMs, sendDanmakuEnabled } = options;
+  const { exploreStartedAt, logger, maxRunMs, observeRoomMs, sendDanmakuEnabled, signal } = options;
   let activeWatch: ActiveWatch | undefined;
 
   async function watchRoom(roomId: number, durationMinutes: number) {
@@ -128,6 +129,7 @@ export function createWatchManager(options: WatchManagerOptions) {
       mode: 'explore',
       sendDanmakuEnabled,
       stopAfterMs: 0,
+      signal,
     });
     const now = Date.now();
     const watch: ActiveWatch = {

@@ -42,7 +42,7 @@ export default defineConfig({
       },
       start: {
         cache: false,
-        command: 'node --import @oxc-node/core/register dist/index.mjs',
+        command: 'node dist/index.mjs',
         dependsOn: ['build'],
       },
     },
